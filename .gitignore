@@ -1,3 +1,11 @@
 vms/
 isos/
 *.iso
+__pycache__/
+*.pyc
+control/.venv/
+control/.last.png
+control/.size.png
+control/*.png
+.env
+control/.env
