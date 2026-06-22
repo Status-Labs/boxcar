@@ -17,6 +17,18 @@ echo "=== Google Chrome ==="
 curl -fsSL https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb -o /tmp/chrome.deb
 apt-get install -y /tmp/chrome.deb || apt-get -f install -y
 rm -f /tmp/chrome.deb
+# Managed policy: skip the first-run / "Sign in to Chrome" promo and the
+# default-browser nag, so Chrome opens straight into browsing (any launcher).
+install -d /etc/opt/chrome/policies/managed
+cat > /etc/opt/chrome/policies/managed/agent.json <<'EOF'
+{
+  "BrowserSignin": 0,
+  "SyncDisabled": true,
+  "DefaultBrowserSettingEnabled": false,
+  "PromotionalTabsEnabled": false,
+  "MetricsReportingEnabled": false
+}
+EOF
 
 echo "=== GDM: Xorg, password login (keeps the keyring encrypted) ==="
 # Deliberately NO autologin: password login lets pam_gnome_keyring create and

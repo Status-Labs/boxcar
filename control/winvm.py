@@ -24,10 +24,15 @@ import socket
 import time
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_DEFAULT_QMP = os.path.join(_HERE, "..", "vms", "win11-qmp.sock")
 
 
-class WinVM:
+class VM:
+    """Base VM control: QMP (screen/keyboard/mouse) + SSH (run/copy).
+    Subclasses set DEFAULT_QMP / DEFAULT_PORT and add OS-specific helpers
+    (WinVM.powershell, LinuxVM.bash/sudo)."""
+    DEFAULT_QMP = os.path.join(_HERE, "..", "vms", "win11", "qmp.sock")
+    DEFAULT_PORT = 2222
+
     def __init__(
         self,
         qmp_sock: str | None = None,
@@ -36,11 +41,10 @@ class WinVM:
         username: str | None = None,
         password: str | None = None,
     ):
-        # Explicit args win; otherwise fall back to env (set by config.load_env),
-        # then to the defaults that match win11.sh.
-        self.qmp_sock = os.path.abspath(qmp_sock or os.getenv("VM_QMP_SOCK") or _DEFAULT_QMP)
+        # Explicit args win; otherwise env (config.load_env), then subclass default.
+        self.qmp_sock = os.path.abspath(qmp_sock or os.getenv("VM_QMP_SOCK") or self.DEFAULT_QMP)
         self.ssh_host = ssh_host or os.getenv("VM_SSH_HOST", "127.0.0.1")
-        self.ssh_port = int(ssh_port or os.getenv("VM_SSH_PORT", "2222"))
+        self.ssh_port = int(ssh_port or os.getenv("VM_SSH_PORT", str(self.DEFAULT_PORT)))
         self.username = username or os.getenv("VM_USER", "user")
         self.password = password or os.getenv("VM_PASS", "user")
         self._sock = None
@@ -153,22 +157,12 @@ class WinVM:
         raise RuntimeError(f"SSH connect failed after {retries} tries: {last}")
 
     def run(self, command: str, timeout: int = 120):
-        """Run a command via the guest's default shell (cmd.exe).
-        Returns (exit_code, stdout, stderr)."""
+        """Run a command via the guest's default shell (cmd.exe on Windows, bash
+        on Linux). Returns (exit_code, stdout, stderr)."""
         c = self._ssh_connect()
         _in, out, err = c.exec_command(command, timeout=timeout)
         rc = out.channel.recv_exit_status()
         return rc, out.read().decode("utf-8", "replace"), err.read().decode("utf-8", "replace")
-
-    def powershell(self, script: str, timeout: int = 300):
-        """Run a PowerShell script robustly (base64-encoded, no quoting issues).
-        Returns stdout (raises on non-zero exit)."""
-        enc = base64.b64encode(script.encode("utf-16-le")).decode()
-        rc, out, err = self.run(
-            f"powershell -NoProfile -NonInteractive -EncodedCommand {enc}", timeout)
-        if rc != 0:
-            raise RuntimeError(f"powershell exit {rc}: {err or out}")
-        return out
 
     def upload(self, local: str, remote: str):
         """Copy a host file into the guest (remote uses forward slashes, e.g.
@@ -199,6 +193,54 @@ class WinVM:
 
     def __exit__(self, *exc):
         self.close()
+
+
+class WinVM(VM):
+    """Windows 11 VM. SSH default shell is cmd.exe; use powershell() for PS."""
+    DEFAULT_QMP = os.path.join(_HERE, "..", "vms", "win11", "qmp.sock")
+    DEFAULT_PORT = 2222
+
+    def powershell(self, script: str, timeout: int = 300):
+        """Run a PowerShell script robustly (base64 -EncodedCommand, no quoting).
+        Returns stdout (raises on non-zero exit)."""
+        enc = base64.b64encode(script.encode("utf-16-le")).decode()
+        rc, out, err = self.run(
+            f"powershell -NoProfile -NonInteractive -EncodedCommand {enc}", timeout)
+        if rc != 0:
+            raise RuntimeError(f"powershell exit {rc}: {err or out}")
+        return out
+
+
+class LinuxVM(VM):
+    """Ubuntu/Linux VM. SSH default shell is bash."""
+    DEFAULT_QMP = os.path.join(_HERE, "..", "vms", "ubuntu", "qmp.sock")
+    DEFAULT_PORT = 2223
+
+    def bash(self, script: str, timeout: int = 300):
+        """Run a bash script; returns stdout (raises on non-zero exit)."""
+        rc, out, err = self.run(script, timeout)
+        if rc != 0:
+            raise RuntimeError(f"bash exit {rc}: {err or out}")
+        return out
+
+    def sudo(self, script: str, timeout: int = 300):
+        """Run a bash script as root via sudo (password supplied over stdin)."""
+        import shlex
+        rc, out, err = self.run(
+            f"echo {shlex.quote(self.password)} | sudo -S bash -c {shlex.quote(script)}",
+            timeout)
+        if rc != 0:
+            raise RuntimeError(f"sudo exit {rc}: {err or out}")
+        return out
+
+    def launch_gui(self, command: str):
+        """Launch a GUI app into the logged-in desktop session from SSH by
+        borrowing the session's DISPLAY/XAUTHORITY (Xorg)."""
+        return self.run(
+            "PID=$(pgrep -u %s gnome-shell | head -1); "
+            "export $(tr '\\0' '\\n' < /proc/$PID/environ | "
+            "grep -E '^(DISPLAY|XAUTHORITY|DBUS_SESSION_BUS_ADDRESS)=' | xargs); "
+            "nohup %s >/dev/null 2>&1 & echo launched" % (self.username, command))
 
 
 # --- character -> (modifiers, qcode) map for type() --------------------------
