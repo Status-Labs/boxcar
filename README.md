@@ -14,7 +14,10 @@ Each VM is a single script. Disks, UEFI vars, and TPM state live in `vms/`.
 | `lib/qmp.py`      | QMP helper (auto-keypress, screenshots)              |
 | `control/winvm.py`| Python library to fully control the Windows VM       |
 | `control/agent.py`| Let an LLM drive the VM autonomously (computer-use)  |
-| `control/agent_graph.py`| Same agent as a LangGraph StateGraph            |
+| `control/agent_dspy.py`| Same agent built with DSPy (Signatures + LiteLLM) |
+| `control/optimize.py`| DSPy optimizer pass — tunes the agent's policy (per-OS) |
+| `control/os_context.py`| Loads the per-OS agent guide (single source of truth) |
+| `control/guides/*.md`| Editable OS "user guides" given to the agent as context |
 | `control/backends.py`| LLM provider adapters (Anthropic / OpenAI / compat) |
 | `isos/`           | Installer ISOs (git-ignored)                         |
 | `vms/<type>/`     | Per-VM state: `disk.qcow2`, `vars.fd`, `tpm/`, `base.qcow2`, `clones/` |
@@ -171,22 +174,101 @@ To add another provider, implement a small class with a `step()` method in
 `backends.py` and register it in `make_backend()`. Edit the `TOOLS` list or
 `system` prompt in `agent.py` to change capabilities/behavior.
 
-### LangGraph variant (`control/agent_graph.py`)
+### DSPy variant (`control/agent_dspy.py`)
 
-Same tools, same `WinVM` execution, same `.env` — but the loop is an explicit
-**LangGraph `StateGraph`** (`START → llm → act → llm → … → END`) using
-LangChain's `init_chat_model`, so it plugs into the LangChain/LangGraph
-ecosystem (checkpointers, streaming, tracing, human-in-the-loop). The screenshot
-result is fed back as an image message so any vision model can see the desktop.
+Same `WinVM`/`LinuxVM` execution and same `.env` — but the decision is a
+**DSPy `Signature`** instead of a hand-written tool loop. Each step feeds the OS
+guidance, the task, the history, and the *current screenshot* (`dspy.Image`) into
+`NextAction → (done, tool, args, note)`; we run the action and loop. DSPy reaches
+any provider through **LiteLLM**, so the model is just a string
+(`openai/gpt-4o`, `anthropic/claude-opus-4-8`), and the program is optimizable
+with DSPy's tooling.
 
 ```bash
 cp .env.example .env        # same config as agent.py
-.venv/bin/python agent_graph.py "Open Notepad and write a haiku"
-.venv/bin/python agent_graph.py --provider openai "..."
+.venv/bin/python agent_dspy.py --target ubuntu "Report the Node.js version"
+.venv/bin/python agent_dspy.py --provider openai "Open Notepad and write a haiku"
 ```
 
 `agent.py` is the lightweight, dependency-minimal option (provider SDKs only);
-`agent_graph.py` adds the LangGraph/LangChain stack (in `requirements.txt`).
+`agent_dspy.py` adds DSPy + LiteLLM (in `requirements.txt`). Both are
+target-aware (`--target win11|ubuntu`).
+
+#### Optimizing the policy (`control/optimize.py`)
+
+Because the decision is a DSPy program, it can be **compiled**. `optimize.py`
+holds a labeled dataset — real screenshots (`control/optim/screens/`) → the
+correct action for common tasks — and an **args-level** metric (right tool, and
+for keyboard/shell actions the right key / a real script). Two optimizers:
+
+```bash
+cd control
+.venv/bin/python optimize.py                      # MIPROv2 (instruction-only) — default
+.venv/bin/python optimize.py --method bootstrap   # BootstrapFewShot (few-shot demos)
+```
+
+The dataset spans **common + complex tasks** (logins, app-launch, browser
+shortcuts, and multi-step work like "write & run a Node script", "install &
+verify a package"); the guides carry matching **recipes** so the agent knows how
+to do them. Optimization is **per-OS**: `--target win11|ubuntu` (default: both)
+trains on that OS's examples and writes `optimized_<target>.json` (git-ignored,
+regenerable), which `agent_dspy.py` **auto-loads** for the matching target. So
+Windows and Ubuntu get independently-tuned policies — no cross-OS demo leakage.
+MIPROv2 needs `optuna` (in `requirements.txt`). Use `--eval-only` to just score.
+
+**What we found (gpt-4o, common-tasks set) — context beat optimization:**
+
+1. With the *old terse* prompt, Ubuntu baseline was **83%**; the miss was a
+   **grounding** error ("open the Files app" → model clicks a dock icon instead
+   of pressing Super). Neither MIPROv2 nor BootstrapFewShot fixed it — the rule
+   was already in the prompt, so rewording/demos didn't help.
+2. Moving the OS knowledge into a real **user guide** (`control/guides/ubuntu.md`,
+   which names the Files app and says "open via Super → type name") lifted the
+   baseline to **100%** (Ubuntu and Windows). The context fixed what the
+   optimizer could not.
+
+Takeaways:
+- **Invest in the OS guides first.** They're the agent's domain knowledge and the
+  cheapest, highest-leverage fix for grounding misses. Just edit the markdown.
+- **MIPROv2 is the right optimizer when headroom remains** — it tunes only the
+  instruction (`max_*_demos=0`), giving a ~1.5K artifact with **no extra images
+  per call**, vs BootstrapFewShot's ~500K (demo screenshots inlined). With the
+  guides in place, gpt-4o already scores 100% here, so there's nothing left to
+  optimize; grow `DATA` (and try `--provider anthropic`) to find new headroom.
+
+### Accessibility tree (`--a11y`)
+
+`agent_dspy.py --a11y` adds an **accessibility tree** to each step — the on-screen
+elements with names/roles/rects — plus a `click_element` tool to act on an
+element by name. `ui_tree()` tags each element `clickable` (a rect is trusted
+only if it has size, isn't a bogus `(0,0)`, and is on-screen); when an element
+isn't clickable, the agent **falls back** to vision (`left_click` on the
+screenshot), keyboard, or shell. Works on both targets:
+
+| | backend | in-guest helper | how it runs |
+|---|---|---|---|
+| **Ubuntu** | AT-SPI2 (`pyatspi`) | `config/ubuntu/atspi_helper.py` | SSH in the session |
+| **Windows** | UI Automation (.NET) | `config/win11/uia_helper.ps1` | scheduled task, interactive token |
+
+VM methods: `LinuxVM`/`WinVM.ensure_a11y()` / `ui_tree()` / `click_element()`.
+(Windows UIA can't be queried from the SSH session — it's a different session —
+so the helper runs in the **interactive desktop session** via a one-shot
+scheduled task; Linux just borrows the session's DBus/X env.)
+
+**What the prototype showed (honest):**
+- **Observability is great on both** — `ui_tree()` reliably enumerates elements
+  by name (the agent *knows* "Files", "File Explorer pinned", … exist).
+- **Windows UIA gives reliable rects** — all 60 taskbar/app elements came back
+  `clickable=True` with accurate coordinates; `click_element` takes the precise
+  `rect` path. This is the a11y win that pays off.
+- **Linux GTK4/libadwaita is weak** — GNOME Files/Settings report **bogus
+  `(0,0)` rects** *and* no "activate/open" action on folders. There the fallback
+  kicks in (vision/shell); the guide recommends `nautilus ~/Documents` / `ctrl-l`.
+
+**Answer to "do a11y trees help complex tasks?":** yes — strongly on **Windows
+(UIA)** where rects are dependable, and on Linux for **perception + well-behaved
+widgets** (shell/GTK3), with graceful fallback to vision/shell where AT-SPI is
+too immature (GTK4). a11y is opt-in (`--a11y`); default behavior is unchanged.
 
 ## Fast VM spawning (golden images)
 
