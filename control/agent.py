@@ -1,40 +1,29 @@
 #!/usr/bin/env python3
-"""Drive the Windows 11 VM with an LLM (provider-agnostic computer-use loop).
+"""Drive a Windows 11 or Ubuntu VM with an LLM (provider-agnostic loop).
 
-The LLM gets tools that wrap WinVM — see the screen (screenshot), move/click the
-mouse, type, press keys, and run PowerShell in the guest. It loops: look at a
-screenshot -> act -> look again, until the task is done. Works with Anthropic,
-OpenAI, or any OpenAI-compatible endpoint.
+The LLM gets tools that wrap the VM — see the screen (screenshot), move/click the
+mouse, type, press keys, and run a shell (PowerShell on Windows, bash on Ubuntu).
+It loops: look at a screenshot -> act -> look again, until the task is done.
 
-Setup:
-    cd control
-    python3 -m venv --without-pip .venv
-    .venv/bin/python <(curl -sS https://bootstrap.pypa.io/get-pip.py)
-    .venv/bin/python -m pip install -r requirements.txt
-
-Run (VM must be booted — ./win11.sh):
-    # Anthropic (default)
-    export ANTHROPIC_API_KEY=sk-ant-...
+Run (VM must be booted / spawned):
+    # Windows (default)
     .venv/bin/python agent.py "Open Notepad and write a haiku, save to Desktop"
+    # Ubuntu
+    .venv/bin/python agent.py --target ubuntu "Open Chrome and go to wikipedia.org"
 
-    # OpenAI
-    export OPENAI_API_KEY=sk-...
-    .venv/bin/python agent.py --provider openai "..."
+Point at a specific spawned instance via its printed env, e.g.:
+    VM_SSH_PORT=2222 VM_QMP_SOCK=vms/ubuntu/clones/x-qmp.sock \\
+      .venv/bin/python agent.py --target ubuntu "..."
 
-    # Any OpenAI-compatible endpoint (e.g. local Ollama with a vision model)
-    OPENAI_BASE_URL=http://localhost:11434/v1 OPENAI_MODEL=llama3.2-vision \\
-      .venv/bin/python agent.py --provider openai "..."
-
-Model overrides: ANTHROPIC_MODEL (default claude-opus-4-8), OPENAI_MODEL (default gpt-4o).
+Provider: --provider anthropic|openai (or AGENT_PROVIDER in .env).
 """
 import os
 import sys
 
 from backends import ToolObservation, make_backend
 from config import load_env
-from winvm import WinVM
+from winvm import LinuxVM, WinVM
 
-# Friendly key names -> QEMU qcodes (for the `key` tool).
 KEY_ALIASES = {
     "enter": "ret", "return": "ret", "esc": "esc", "escape": "esc",
     "space": "spc", "tab": "tab", "backspace": "backspace",
@@ -51,8 +40,8 @@ def to_qcodes(combo: str):
             for p in combo.split("-")]
 
 
-# Neutral tool definitions: {name, description, parameters (JSON Schema)}.
-TOOLS = [
+# Shared GUI tools (QMP) — identical on both OSes.
+GUI_TOOLS = [
     {"name": "screenshot",
      "description": "Capture the current screen and return it as an image.",
      "parameters": {"type": "object", "properties": {}}},
@@ -70,33 +59,71 @@ TOOLS = [
          "text": {"type": "string"}}, "required": ["text"]}},
     {"name": "key",
      "description": ("Press a key or chord. Join modifiers with '-', e.g. "
-                     "'enter', 'ctrl-c', 'alt-tab', 'win-r'."),
+                     "'enter', 'ctrl-c', 'alt-tab', 'super'."),
      "parameters": {"type": "object", "properties": {
          "keys": {"type": "string"}}, "required": ["keys"]}},
-    {"name": "run_powershell",
-     "description": ("Run a PowerShell script inside Windows over SSH and return "
-                     "its output. Prefer this for file ops, installing software, "
-                     "or anything scriptable — faster than driving the GUI."),
-     "parameters": {"type": "object", "properties": {
-         "script": {"type": "string"}}, "required": ["script"]}},
 ]
+
+RUN_TOOL = {
+    "win11": {"name": "run_powershell",
+              "description": "Run a PowerShell script inside Windows over SSH and "
+                             "return its output."},
+    "ubuntu": {"name": "run_bash",
+               "description": "Run a bash command inside Ubuntu over SSH and return "
+                              "its output. For root, prefix: echo user | sudo -S ..."},
+}
+
+VM_CLASS = {"win11": WinVM, "ubuntu": LinuxVM}
 
 SHOT = "/tmp/agent_shot.png"
 
 
-def run_tool(vm: WinVM, call) -> ToolObservation:
-    """Execute one tool call; return what the model should observe."""
+def system_prompt(target, w, h):
+    common = (f"The screen is {w}x{h} pixels; coordinates are pixels from the "
+              "top-left. ALWAYS call screenshot first to see the current screen, "
+              "and again after each GUI action to confirm the result — never act "
+              "blindly. When the task is complete, stop and briefly report what "
+              "you did.")
+    if target == "win11":
+        return (
+            "You are operating a Windows 11 VM through tools. " + common +
+            " If you see a lock/sign-in screen, click it, type the password "
+            "'user' and press enter. Prefer run_powershell for file operations, "
+            "installing software, or anything scriptable; use mouse/keyboard only "
+            "for GUI-only steps. Programs launched via run_powershell run in a "
+            "background session and their windows DON'T appear on the desktop — "
+            "to open a visible window use the GUI tools (win-r, or win-e). When "
+            "browsing in Chrome, press ctrl-l to focus the address bar before "
+            "typing a URL. The user 'user' is an administrator.")
+    return (
+        "You are operating an Ubuntu 24.04 desktop (GNOME) VM through tools. "
+        + common +
+        " If you see the GDM login screen, click the 'user' entry, type the "
+        "password 'user' and press enter. Prefer run_bash for file operations, "
+        "installing software (apt), or anything scriptable; use mouse/keyboard "
+        "only for GUI-only steps. For commands needing root, run "
+        "`echo user | sudo -S <command>`. To OPEN a GUI app so it appears on the "
+        "desktop, press the 'super' key to open Activities, type the app name, "
+        "and press enter (do NOT launch GUI apps via run_bash — they won't show). "
+        "Google Chrome, Node.js, git and yt-dlp are installed. To browse: open "
+        "Chrome via Activities, then press ctrl-l, type the URL, press enter.")
+
+
+def run_tool(vm, call) -> ToolObservation:
     name, args = call.name, call.args
     if name == "screenshot":
         vm.screenshot(SHOT)
         return ToolObservation(call.call_id, "Here is the screen:", SHOT)
-    if name == "run_powershell":
+    if name in ("run_powershell", "run_bash"):
         try:
-            out = vm.powershell(args["script"])  # raises on non-zero exit
+            if name == "run_powershell":
+                out = vm.powershell(args["script"])
+            else:
+                rc, o, e = vm.run(args["script"])
+                out = (o + e).strip() or "(no output)"
             return ToolObservation(call.call_id, out or "(no output)")
-        except Exception as e:  # noqa: BLE001 - surface the error to the model
+        except Exception as e:  # noqa: BLE001 - surface to the model
             return ToolObservation(call.call_id, f"ERROR: {e}")
-    # GUI action tools
     if name == "left_click":
         vm.click(args["x"], args["y"])
     elif name == "double_click":
@@ -113,44 +140,29 @@ def run_tool(vm: WinVM, call) -> ToolObservation:
 
 
 def main():
-    load_env()  # pull control/.env into the environment
+    load_env()
     argv = sys.argv[1:]
     provider = os.getenv("AGENT_PROVIDER", "anthropic")
-    if argv and argv[0] == "--provider":
-        provider, argv = argv[1], argv[2:]
+    target = os.getenv("AGENT_TARGET", "win11")
+    while argv and argv[0] in ("--provider", "--target"):
+        if argv[0] == "--provider":
+            provider, argv = argv[1], argv[2:]
+        else:
+            target, argv = argv[1], argv[2:]
+    if target not in VM_CLASS:
+        raise SystemExit(f"unknown --target {target!r} (use win11 or ubuntu)")
     task = argv[0] if argv else "Take a screenshot and describe what's on screen."
 
-    vm = WinVM()
+    vm = VM_CLASS[target]()
     w, h = vm._resolution()  # noqa: SLF001 - prime + report screen size to the model
-    system = (
-        "You are operating a Windows 11 virtual machine through tools. "
-        f"The screen is {w}x{h} pixels; coordinates are pixels from the top-left. "
-        "ALWAYS call the screenshot tool first to see the current screen, and "
-        "again after each GUI action to confirm the result — never act blindly. "
-        "If you see a lock or sign-in screen, click it, type the password 'user' "
-        "and press enter. "
-        "Prefer run_powershell for file operations, installing software, or "
-        "anything scriptable; use the mouse/keyboard tools only for GUI-only "
-        "steps. Installed CLI tools you can call via run_powershell: node, npm, "
-        "git, choco (install more), and yt-dlp (download video info and "
-        "subtitles/transcripts). For a YouTube transcript, use yt-dlp (e.g. "
-        "`yt-dlp --skip-download --write-auto-subs --sub-langs en --sub-format "
-        "vtt -o <path> <url>`) rather than scraping the page. The .vtt holds "
-        "timestamps and inline <...> tags — for clean text, drop lines "
-        "containing '-->', strip <...> tags, and dedup repeated lines. "
-        "NOTE: programs launched via run_powershell run in a background "
-        "session and their WINDOWS DO NOT APPEAR on the desktop — to open a "
-        "visible window (File Explorer, an app), use the GUI tools (e.g. win-r "
-        "then type the path/command, or win-e), not run_powershell. "
-        "When browsing in Chrome, press ctrl-l to focus the address bar before "
-        "typing a URL (more reliable than clicking it), then type the full URL "
-        "and press enter. "
-        "The logged-in user 'user' is an administrator. When the task is "
-        "complete, stop and briefly report what you did."
-    )
+    tools = GUI_TOOLS + [{
+        "name": RUN_TOOL[target]["name"],
+        "description": RUN_TOOL[target]["description"],
+        "parameters": {"type": "object", "properties": {
+            "script": {"type": "string"}}, "required": ["script"]}}]
 
-    print(f"[provider: {provider}]  task: {task}\n")
-    backend = make_backend(provider, system, TOOLS, task)
+    print(f"[provider: {provider} | target: {target}]  task: {task}\n")
+    backend = make_backend(provider, system_prompt(target, w, h), tools, task)
 
     observations = None
     while True:

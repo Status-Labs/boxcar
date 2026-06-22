@@ -133,7 +133,18 @@ images so the model can see the desktop and react. It prefers `run_powershell`
 (over SSH) for scriptable work and the mouse/keyboard tools for GUI-only steps.
 
 It is **provider-agnostic** (`control/backends.py`): Anthropic, OpenAI, or any
-OpenAI-compatible endpoint.
+OpenAI-compatible endpoint — and **target-aware**: `--target win11` (default) or
+`--target ubuntu`. The Windows target runs PowerShell over SSH; the Ubuntu
+target runs bash. `control/winvm.py` provides a shared `VM` base with `WinVM`
+and `LinuxVM` subclasses.
+
+```bash
+# Windows (default)
+.venv/bin/python agent.py "Open Notepad and write a haiku, save to Desktop"
+# Ubuntu — point at a spawned instance's port/socket
+VM_SSH_PORT=2222 VM_QMP_SOCK=vms/ubuntu/clones/x-qmp.sock \
+  .venv/bin/python agent.py --target ubuntu "Create ~/Desktop/notes.txt with today's date"
+```
 
 **Configure once** — copy the template and fill in your keys. `agent.py` and
 `demo.py` load `control/.env` automatically:

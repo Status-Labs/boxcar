@@ -72,8 +72,9 @@ unnecessary — duplicates never coexist.
 - [x] `bake` added to `win11.sh` and `ubuntu.sh` (`bake_base` in `lib/common.sh`).
 - [x] `spawn.sh` — CoW overlay + per-instance NVRAM/TPM/QMP/SSH-port, boots in seconds.
 - [x] Ubuntu base baked (~5.5G) and verified: spawn = overlay in ~5ms, boot ~30s, overlay ~15M.
-- [ ] Bake the Windows base (`./win11.sh bake`).
+- [x] Bake the Windows base (`./win11.sh bake`) → 29G, spawn+boot verified.
 - [ ] Optional: first-boot generalization for parallel fleets.
+- [ ] Optional: slim the Windows base (disk cleanup + zero free space before bake).
 
 ### Measured
 | Step | Cost |
