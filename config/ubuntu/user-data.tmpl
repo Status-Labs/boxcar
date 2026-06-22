@@ -1,0 +1,30 @@
+#cloud-config
+autoinstall:
+  version: 1
+  interactive-sections: []
+  locale: en_US.UTF-8
+  keyboard:
+    layout: us
+  source:
+    id: ubuntu-desktop
+    search_drivers: false
+  storage:
+    layout:
+      name: direct
+  identity:
+    hostname: ubuntu-vm
+    realname: user
+    username: user
+    password: "$6$r9feaxrGM7sVhQbT$zJo0.2Wujq.gO86oeK6m2wNLrGu.J3NpGDvujnGqqZIuZHCxzlimTWDflBsHJ67yW..Rjdro/zv5nVwnQV9OW."
+  ssh:
+    install-server: true
+    allow-pw: true
+  packages:
+    - curl
+    - ca-certificates
+    - gnupg
+  late-commands:
+    - echo __PROVISION_B64__ | base64 -d > /target/usr/local/sbin/provision.sh
+    - chmod +x /target/usr/local/sbin/provision.sh
+    # Best-effort: never fail the install if provisioning hits a snag (log it).
+    - curtin in-target --target=/target -- bash -c "bash /usr/local/sbin/provision.sh > /var/log/provision.log 2>&1 || true"

@@ -47,6 +47,23 @@ ensure_vars() {
   fi
 }
 
+# --- Golden image baking ------------------------------------------------------
+# bake_base <disk> <base> <vars> <base-vars>
+# Flatten+compress the provisioned disk into a read-only base image, and stash a
+# copy of the firmware NVRAM as the template clones boot from. Spawn fast VMs
+# from the base via copy-on-write overlays (see spawn.sh).
+bake_base() {
+  local disk="$1" base="$2" vars="$3" base_vars="$4"
+  [[ -f "$disk" ]] || { echo "ERROR: nothing to bake — no disk at $disk" >&2; exit 1; }
+  echo ">> Baking base image (flatten + compress)..."
+  rm -f "$base"
+  qemu-img convert -O qcow2 -c "$disk" "$base"
+  chmod 0444 "$base"
+  [[ -f "$vars" ]] && { cp "$vars" "$base_vars"; chmod 0444 "$base_vars"; }
+  echo ">> Base ready: $base ($(du -h "$base" | cut -f1), read-only)."
+  echo "   Spawn instances with:  ./spawn.sh <win11|ubuntu> <name>"
+}
+
 # --- Software TPM 2.0 (required by Win 11; harmless for Ubuntu) ---------------
 # Starts swtpm in the background and returns its socket path via $TPM_SOCK.
 # The swtpm process is killed automatically when this script exits.
@@ -68,6 +85,26 @@ start_swtpm() {
 
 cleanup() {
   [[ -n "$TPM_PID" ]] && kill "$TPM_PID" 2>/dev/null || true
+}
+
+# --- Unattend ISO ------------------------------------------------------------
+# build_unattend_iso <answer-file> <out.iso>  — a tiny CD holding autounattend.xml
+# (and provision.ps1, if present alongside it) at its root, which Windows Setup
+# auto-detects on removable media.
+build_unattend_iso() {
+  local answer="$1" out="$2"
+  need xorriso
+  [[ -f "$answer" ]] || { echo "ERROR: answer file not found: $answer" >&2; exit 1; }
+  local srcdir; srcdir="$(dirname "$answer")"
+  local provision="$srcdir/provision.ps1"
+  if [[ ! -f "$out" || "$answer" -nt "$out" || ( -f "$provision" && "$provision" -nt "$out" ) ]]; then
+    echo ">> Building unattend ISO: $out"
+    local staging; staging="$(mktemp -d)"
+    cp "$answer" "$staging/autounattend.xml"
+    [[ -f "$provision" ]] && cp "$provision" "$staging/provision.ps1"
+    xorriso -as mkisofs -J -r -V UNATTEND -o "$out" "$staging" >/dev/null 2>&1
+    rm -rf "$staging"
+  fi
 }
 
 # --- TPM device args ---------------------------------------------------------

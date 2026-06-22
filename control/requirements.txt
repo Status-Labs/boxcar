@@ -1,0 +1,11 @@
+# Core: WinVM control + the lightweight agent.py (Anthropic / OpenAI SDKs)
+paramiko>=3.4
+Pillow>=10.0
+anthropic>=0.40
+openai>=1.40
+
+# LangGraph agent (control/agent_graph.py)
+langgraph>=0.2
+langchain>=0.3
+langchain-anthropic>=0.3
+langchain-openai>=0.2
