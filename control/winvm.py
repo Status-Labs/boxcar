@@ -1,19 +1,22 @@
-"""WinVM — full programmatic control of the QEMU Windows 11 VM from Python.
+"""Programmatic control of a QEMU VM from Python — Windows or Ubuntu.
 
-Two channels:
+Two channels, both OS-agnostic at the transport level:
   * QMP  (host -> VM hardware): screenshot, mouse, keyboard. Works even at the
     login screen; needs nothing installed in the guest.
-  * SSH  (into the guest OS): run commands, copy files. Needs OpenSSH running in
-    the guest (provision.ps1 enables it) and the QEMU port-forward in win11.sh.
+  * SSH  (into the guest OS): run commands, copy files. Needs OpenSSH in the
+    guest (the provision scripts enable it) and the QEMU port-forward.
+
+Class layout (the ONLY Windows-vs-Ubuntu differences live in the subclasses):
+  * VM       — shared base: QMP (screenshot/click/key/type) + SSH (run/upload).
+  * WinVM    — Windows 11: default port 2222 / vms/win11/qmp.sock; .powershell().
+  * LinuxVM  — Ubuntu:     default port 2223 / vms/ubuntu/qmp.sock; .bash()/.sudo()/.launch_gui().
 
 Example
 -------
-    from winvm import WinVM
-    vm = WinVM()
-    print(vm.powershell("node --version; git --version"))   # OS-level
-    vm.screenshot("desktop.png")                              # visual
-    vm.run("start notepad"); vm.sleep(2)
-    vm.type("Hello from Python!")
+    from winvm import WinVM, LinuxVM
+    win = WinVM();   print(win.powershell("node --version"))   # Windows
+    ubu = LinuxVM(); print(ubu.bash("node --version"))         # Ubuntu
+    win.screenshot("desktop.png"); win.click(100, 200); win.type("hi")
 """
 from __future__ import annotations
 
@@ -195,6 +198,9 @@ class VM:
         self.close()
 
 
+# ============================================================================
+# OS-specific subclasses — Windows vs Ubuntu differences live ONLY below here.
+# ============================================================================
 class WinVM(VM):
     """Windows 11 VM. SSH default shell is cmd.exe; use powershell() for PS."""
     DEFAULT_QMP = os.path.join(_HERE, "..", "vms", "win11", "qmp.sock")
@@ -209,6 +215,72 @@ class WinVM(VM):
         if rc != 0:
             raise RuntimeError(f"powershell exit {rc}: {err or out}")
         return out
+
+    # --- Accessibility tree (UI Automation) ------------------------------------
+    _UIA_LOCAL = os.path.join(_HERE, "..", "config", "win11", "uia_helper.ps1")
+
+    def ensure_a11y(self):
+        """Upload the UIA helper. (System.Windows.Automation is built into .NET on
+        Windows — nothing to install.)"""
+        self.upload(os.path.abspath(self._UIA_LOCAL),
+                    f"C:/Users/{self.username}/uia_helper.ps1")
+
+    def _uia_dump(self, limit: int = 80) -> str:
+        """Run the UIA helper in the INTERACTIVE desktop session via a scheduled
+        task (the SSH session is a different session and can't see the desktop),
+        and return the JSON it writes to uia_out.json."""
+        u = self.username
+        outp = rf"C:\Users\{u}\uia_out.json"
+        helper = rf"C:\Users\{u}\uia_helper.ps1"
+        self.run(f'cmd /c del /q "{outp}" 2>nul')
+        tr = (f"powershell -NoProfile -ExecutionPolicy Bypass -File {helper} {limit}")
+        self.run(f'schtasks /create /tn uiaq /tr "{tr}" /sc once /st 00:00 '
+                 f'/ru {u} /it /f')
+        self.run("schtasks /run /tn uiaq")
+        content = ""
+        for _ in range(10):
+            _rc, content, _e = self.run(f'cmd /c if exist "{outp}" type "{outp}"')
+            if content.strip():
+                break
+            time.sleep(1.5)
+        self.run("schtasks /delete /tn uiaq /f")
+        return content.strip()
+
+    def ui_tree(self, limit: int = 80):
+        """Return visible, actionable UI elements as
+        [{"name","role","rect":[x,y,w,h],"clickable":bool}] from Windows UIA.
+        Windows reports reliable rects, so `clickable` is essentially always True."""
+        raw = self._uia_dump(limit)
+        try:
+            data = json.loads(raw) if raw else []
+        except json.JSONDecodeError:
+            return []
+        if isinstance(data, dict):
+            data = [data] if data.get("name") else []
+        for e in data:
+            r = e.get("rect")
+            e["clickable"] = bool(r and r[2] > 0 and r[3] > 0
+                                  and 0 <= r[0] < 6000 and 0 <= r[1] < 4000)
+        return data
+
+    def click_element(self, name=None, role=None, index=None, double=False):
+        """Click a UI element by name or index using its UIA rect (reliable on
+        Windows). Returns (ok: bool, how: str) — "rect" / "bogus" / "notfound"."""
+        els = self.ui_tree()
+        target = None
+        if index is not None and 0 <= index < len(els):
+            target = els[index]
+        elif name:
+            target = next((e for e in els
+                           if name.lower() in (e["name"] or "").lower()
+                           and (role is None or role == e["role"])), None)
+        if target is None:
+            return False, "notfound"
+        if not target.get("clickable"):
+            return False, "bogus"
+        x, y, w, h = target["rect"]
+        self.click(int(x + w / 2), int(y + h / 2), double=double)
+        return True, "rect"
 
 
 class LinuxVM(VM):
@@ -233,14 +305,93 @@ class LinuxVM(VM):
             raise RuntimeError(f"sudo exit {rc}: {err or out}")
         return out
 
+    def _session_env(self) -> str:
+        """Shell prefix that exports the logged-in GNOME session's env (DISPLAY,
+        XAUTHORITY, DBUS_SESSION_BUS_ADDRESS) so SSH commands can reach the GUI
+        and the AT-SPI accessibility bus."""
+        return (f"PID=$(pgrep -u {self.username} gnome-shell | head -1); "
+                "export $(tr '\\0' '\\n' < /proc/$PID/environ | grep -E "
+                "'^(DISPLAY|XAUTHORITY|DBUS_SESSION_BUS_ADDRESS)=' | xargs); ")
+
     def launch_gui(self, command: str):
-        """Launch a GUI app into the logged-in desktop session from SSH by
-        borrowing the session's DISPLAY/XAUTHORITY (Xorg)."""
-        return self.run(
-            "PID=$(pgrep -u %s gnome-shell | head -1); "
-            "export $(tr '\\0' '\\n' < /proc/$PID/environ | "
-            "grep -E '^(DISPLAY|XAUTHORITY|DBUS_SESSION_BUS_ADDRESS)=' | xargs); "
-            "nohup %s >/dev/null 2>&1 & echo launched" % (self.username, command))
+        """Launch a GUI app into the logged-in desktop session from SSH."""
+        return self.run(self._session_env() + f"nohup {command} >/dev/null 2>&1 & echo launched")
+
+    # --- Accessibility tree (AT-SPI) -------------------------------------------
+    _A11Y_REMOTE = "/tmp/atspi_helper.py"
+    _A11Y_LOCAL = os.path.join(_HERE, "..", "config", "ubuntu", "atspi_helper.py")
+
+    def ensure_a11y(self):
+        """Install python3-pyatspi and turn on toolkit accessibility (idempotent).
+        For golden images, bake this into provision.sh instead."""
+        self.run("dpkg -s python3-pyatspi >/dev/null 2>&1 || "
+                 f"(echo {self.password} | sudo -S apt-get install -y "
+                 "python3-pyatspi >/dev/null 2>&1)", timeout=180)
+        self.run(self._session_env() + "gsettings set "
+                 "org.gnome.desktop.interface toolkit-accessibility true")
+        self.upload(os.path.abspath(self._A11Y_LOCAL), self._A11Y_REMOTE)
+
+    @staticmethod
+    def _rect_clickable(r):
+        """A rect is reliable to click only if it has size, isn't piled at the
+        (0,0) origin (the GTK4 'bogus extents' tell), and is on-screen."""
+        return bool(r and r[2] > 0 and r[3] > 0
+                    and not (r[0] == 0 and r[1] == 0)
+                    and 0 <= r[0] < 6000 and 0 <= r[1] < 4000)
+
+    def ui_tree(self, limit: int = 80):
+        """Return visible, actionable UI elements from the guest's AT-SPI tree as
+        [{"name","role","rect":[x,y,w,h] or None,"clickable":bool}]. `clickable`
+        is False when the rect is bogus (GTK4 apps) — the caller should then act
+        by AT-SPI action, vision, or shell instead of clicking the rect."""
+        rc, out, _ = self.run(
+            self._session_env() + f"python3 {self._A11Y_REMOTE} {limit}", timeout=60)
+        line = (out.strip().splitlines() or [""])[-1]
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError:
+            return []
+        if isinstance(data, dict):
+            return []
+        for e in data:
+            e["clickable"] = self._rect_clickable(e.get("rect"))
+        return data
+
+    def click_element(self, name=None, role=None, index=None, double=False):
+        """Activate a UI element by name (preferred) or index, with a fallback
+        chain. Returns (ok: bool, how: str) where how is:
+          "action" — fired the element's AT-SPI action (coordinate-free, best)
+          "rect"   — clicked its valid on-screen rect
+          "bogus"  — found, but no action and a bogus rect (caller should fall
+                     back to vision/screenshot or shell)
+          "notfound" — no matching element in the tree
+        """
+        import shlex
+        if name:
+            rc, out, _ = self.run(
+                self._session_env()
+                + f"python3 {self._A11Y_REMOTE} act {shlex.quote(name)}", timeout=60)
+            try:
+                res = json.loads((out.strip().splitlines() or [""])[-1])
+                if isinstance(res, dict) and res.get("ok"):
+                    return True, "action"
+            except json.JSONDecodeError:
+                pass
+        els = self.ui_tree()
+        target = None
+        if index is not None and 0 <= index < len(els):
+            target = els[index]
+        elif name:
+            target = next((e for e in els
+                           if name.lower() in (e["name"] or "").lower()
+                           and (role is None or role == e["role"])), None)
+        if target is None:
+            return False, "notfound"
+        if not target.get("clickable"):
+            return False, "bogus"
+        x, y, w, h = target["rect"]
+        self.click(int(x + w / 2), int(y + h / 2), double=double)
+        return True, "rect"
 
 
 # --- character -> (modifiers, qcode) map for type() --------------------------

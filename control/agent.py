@@ -22,6 +22,7 @@ import sys
 
 from backends import ToolObservation, make_backend
 from config import load_env
+from os_context import guidance
 from winvm import LinuxVM, WinVM
 
 KEY_ALIASES = {
@@ -64,6 +65,12 @@ GUI_TOOLS = [
          "keys": {"type": "string"}}, "required": ["keys"]}},
 ]
 
+# ============================================================================
+# OS-specific configuration — the ONLY Windows-vs-Ubuntu differences:
+#   VM class, the shell tool (PowerShell vs bash), and the system prompt below.
+# ============================================================================
+VM_CLASS = {"win11": WinVM, "ubuntu": LinuxVM}
+
 RUN_TOOL = {
     "win11": {"name": "run_powershell",
               "description": "Run a PowerShell script inside Windows over SSH and "
@@ -73,40 +80,18 @@ RUN_TOOL = {
                               "its output. For root, prefix: echo user | sudo -S ..."},
 }
 
-VM_CLASS = {"win11": WinVM, "ubuntu": LinuxVM}
-
 SHOT = "/tmp/agent_shot.png"
 
 
 def system_prompt(target, w, h):
-    common = (f"The screen is {w}x{h} pixels; coordinates are pixels from the "
-              "top-left. ALWAYS call screenshot first to see the current screen, "
-              "and again after each GUI action to confirm the result — never act "
-              "blindly. When the task is complete, stop and briefly report what "
-              "you did.")
-    if target == "win11":
-        return (
-            "You are operating a Windows 11 VM through tools. " + common +
-            " If you see a lock/sign-in screen, click it, type the password "
-            "'user' and press enter. Prefer run_powershell for file operations, "
-            "installing software, or anything scriptable; use mouse/keyboard only "
-            "for GUI-only steps. Programs launched via run_powershell run in a "
-            "background session and their windows DON'T appear on the desktop — "
-            "to open a visible window use the GUI tools (win-r, or win-e). When "
-            "browsing in Chrome, press ctrl-l to focus the address bar before "
-            "typing a URL. The user 'user' is an administrator.")
+    # OS knowledge comes from the shared guide (control/guides/<os>.md); here we
+    # add only the loop discipline specific to this tool-calling agent.
     return (
-        "You are operating an Ubuntu 24.04 desktop (GNOME) VM through tools. "
-        + common +
-        " If you see the GDM login screen, click the 'user' entry, type the "
-        "password 'user' and press enter. Prefer run_bash for file operations, "
-        "installing software (apt), or anything scriptable; use mouse/keyboard "
-        "only for GUI-only steps. For commands needing root, run "
-        "`echo user | sudo -S <command>`. To OPEN a GUI app so it appears on the "
-        "desktop, press the 'super' key to open Activities, type the app name, "
-        "and press enter (do NOT launch GUI apps via run_bash — they won't show). "
-        "Google Chrome, Node.js, git and yt-dlp are installed. To browse: open "
-        "Chrome via Activities, then press ctrl-l, type the URL, press enter.")
+        f"You are operating a {'Windows 11' if target == 'win11' else 'Ubuntu'} "
+        "VM through tools. ALWAYS call screenshot first to see the current "
+        "screen, and again after each GUI action to confirm the result — never "
+        "act blindly. When the task is complete, stop and briefly report what "
+        "you did.\n\n" + guidance(target, w, h))
 
 
 def run_tool(vm, call) -> ToolObservation:

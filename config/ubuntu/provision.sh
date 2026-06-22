@@ -30,6 +30,9 @@ cat > /etc/opt/chrome/policies/managed/agent.json <<'EOF'
 }
 EOF
 
+echo "=== accessibility (AT-SPI) tooling for the agent's ui_tree() ==="
+apt-get install -y python3-pyatspi
+
 echo "=== GDM: Xorg, password login (keeps the keyring encrypted) ==="
 # Deliberately NO autologin: password login lets pam_gnome_keyring create and
 # unlock the encrypted login keyring, so Chrome uses real secret storage (not
@@ -52,6 +55,8 @@ lock-enabled=false
 idle-activation-enabled=false
 [org/gnome/settings-daemon/plugins/power]
 sleep-inactive-ac-type='nothing'
+[org/gnome/desktop/interface]
+toolkit-accessibility=true
 EOF
 dconf update || true
 
