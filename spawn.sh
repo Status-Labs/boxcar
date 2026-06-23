@@ -49,7 +49,7 @@ COMMON=(
   -device virtio-scsi-pci,id=scsi0 -device scsi-hd,drive=hd0,bus=scsi0.0
   -netdev user,id=net0,hostfwd=tcp:127.0.0.1:"$port"-:22
   -device virtio-net-pci,netdev=net0,romfile=
-  -vga std -display gtk -usb -device usb-tablet
+  -vga std "${DISPLAY_ARGS[@]}" -usb -device usb-tablet
   -qmp unix:"$MON_SOCK",server,nowait
 )
 

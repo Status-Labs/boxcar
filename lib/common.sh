@@ -27,6 +27,23 @@ else
   KVM_ARGS=(-cpu max)
 fi
 
+# --- Display mode ------------------------------------------------------------
+# DISPLAY_MODE=gtk  (default) — show a QEMU window on your desktop.
+#             =none           — HEADLESS: no window, runs fully in the background.
+#                               The agent still works (QMP screendump reads the
+#                               framebuffer; QMP input goes to the VM's *virtual*
+#                               mouse/keyboard — never your real ones). Use this
+#                               to keep using your own mouse/screen while it runs.
+#             =vnc            — headless but viewable: connect a VNC client to
+#                               127.0.0.1:5900+VNC_DISPLAY to watch, no input grab.
+case "${DISPLAY_MODE:-gtk}" in
+  none) DISPLAY_ARGS=(-display none) ;;
+  vnc)  DISPLAY_ARGS=(-vnc "127.0.0.1:${VNC_DISPLAY:-0}") ;;
+  gtk)  DISPLAY_ARGS=(-display gtk) ;;
+  *)    echo "WARNING: unknown DISPLAY_MODE='$DISPLAY_MODE', using gtk." >&2
+        DISPLAY_ARGS=(-display gtk) ;;
+esac
+
 # --- Disk --------------------------------------------------------------------
 # ensure_disk <path> <size>  — create a qcow2 disk if it doesn't exist.
 ensure_disk() {

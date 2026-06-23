@@ -21,6 +21,7 @@ Provider via --provider or AGENT_PROVIDER; models via OPENAI_MODEL / ANTHROPIC_M
 import json
 import os
 import sys
+import time
 
 import dspy
 import litellm
@@ -110,6 +111,18 @@ class NextActionA11y(dspy.Signature):
     note: str = dspy.OutputField(desc="one short sentence: what you're doing, or the final report")
 
 
+def _downscale(path, maxw):
+    """Shrink the screenshot to <= maxw px wide (fewer image tokens). Best-effort."""
+    try:
+        from PIL import Image
+        img = Image.open(path)
+        if img.width > maxw:
+            h = round(img.height * maxw / img.width)
+            img.resize((maxw, h)).save(path)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def fmt_tree(els):
     if not els:
         return "(accessibility tree empty or unavailable)"
@@ -160,6 +173,11 @@ def execute(vm, target, tool, args):
     return "done (result visible in next screenshot)"
 
 
+def _is_reasoning(model: str) -> bool:
+    """GPT-5 family and o-series are reasoning models (different API rules)."""
+    return model.startswith(("gpt-5", "o1", "o3", "o4"))
+
+
 def make_lm(provider: str):
     """Build the DSPy LM (LiteLLM model string). Keys read from env."""
     if provider == "anthropic":
@@ -170,6 +188,13 @@ def make_lm(provider: str):
     kw = {"api_key": os.getenv("OPENAI_API_KEY"), "max_tokens": 4096}
     if os.getenv("OPENAI_BASE_URL"):
         kw["api_base"] = os.getenv("OPENAI_BASE_URL")
+    if _is_reasoning(model):
+        # Reasoning models: temperature must be 1.0, and the token budget must be
+        # large (reasoning tokens count toward it). reasoning_effort tunes depth
+        # vs. speed/cost (minimal | low | medium | high).
+        kw["temperature"] = 1.0
+        kw["max_tokens"] = max(16000, int(os.getenv("OPENAI_MAX_TOKENS", "16000")))
+        kw["reasoning_effort"] = os.getenv("OPENAI_REASONING_EFFORT", "low")
     return dspy.LM(f"openai/{model}", **kw)
 
 
@@ -212,25 +237,78 @@ def main():
                 print(f"[loaded optimized policy: {cand}]")
                 break
 
+    # Input trimming to cut per-step tokens/cost:
+    #   AGENT_HISTORY_STEPS — keep only the last N actions in history (default 8)
+    #   AGENT_SHOT_MAXW     — downscale screenshots to this width (0 = off; opt-in,
+    #                         since downscaling can hurt click grounding)
+    hist_n = int(os.getenv("AGENT_HISTORY_STEPS", "8"))
+    shot_maxw = int(os.getenv("AGENT_SHOT_MAXW", "0"))
+
     print(f"[dspy | {provider} | {target}{' | a11y' if a11y else ''}]  task: {task}\n")
-    history = "(none yet)"
+    history_lines = []
+    t_start = time.perf_counter()
+    t_llm = t_obs = 0.0           # cumulative: model time vs VM (screenshot/a11y/act) time
+    steps = 0
     for step in range(40):
+        steps = step + 1
+        c0 = time.perf_counter()
         vm.screenshot(SHOT)
-        kw = dict(guidance=rules, task=task, history=history,
+        if shot_maxw:
+            _downscale(SHOT, shot_maxw)
+        hist = "\n".join(history_lines[-hist_n:]) or "(none yet)"
+        kw = dict(guidance=rules, task=task, history=hist,
                   screenshot=dspy.Image(SHOT))
         if a11y:
             kw["ui_tree"] = fmt_tree(vm.ui_tree())
+        c1 = time.perf_counter()
         pred = decide(**kw)
-        print(f"[{step}] {pred.tool} {pred.args}  — {pred.note}")
+        c2 = time.perf_counter()
+        print(f"[{step}] {pred.tool} {pred.args}  (llm {c2 - c1:.1f}s) — {pred.note}")
+        t_llm += c2 - c1
+        t_obs += c1 - c0
         if str(pred.done).lower() == "true":
             break
         try:
             args = json.loads(pred.args or "{}")
         except json.JSONDecodeError:
             args = {}
+        a0 = time.perf_counter()
         obs = execute(vm, target, pred.tool, args)
-        history += f"\n{step}. {pred.tool} {pred.args} -> {obs[:300]}"
+        t_obs += time.perf_counter() - a0
+        history_lines.append(f"{step}. {pred.tool} {pred.args} -> {obs[:300]}")
+
+    total = time.perf_counter() - t_start
+    print(f"\n[timing] {steps} steps in {total:.1f}s "
+          f"(avg {total / steps:.1f}s/step) | model {t_llm:.1f}s | vm {t_obs:.1f}s")
+    _print_usage()
     vm.close()
+
+
+def _print_usage():
+    """Sum tokens + cost from the DSPy LM call history, if available."""
+    try:
+        hist = dspy.settings.lm.history
+    except Exception:  # noqa: BLE001
+        return
+    calls = len(hist)
+    cost = sum((h.get("cost") or 0) for h in hist)
+
+    def _usage(h):
+        u = h.get("usage") or {}
+        return u if isinstance(u, dict) else getattr(u, "__dict__", {})
+
+    def _reasoning(h):
+        d = _usage(h).get("completion_tokens_details")
+        if d is None:
+            return 0
+        return (d.get("reasoning_tokens", 0) if isinstance(d, dict)
+                else getattr(d, "reasoning_tokens", 0)) or 0
+    pin = sum(_usage(h).get("prompt_tokens", 0) or 0 for h in hist)
+    pout = sum(_usage(h).get("completion_tokens", 0) or 0 for h in hist)
+    rtok = sum(_reasoning(h) for h in hist)
+    rstr = f" ({rtok} reasoning)" if rtok else ""
+    cost_str = f" | est cost ${cost:.4f}" if cost else ""
+    print(f"[tokens] {calls} LLM calls, {pin} in + {pout} out{rstr}{cost_str}")
 
 
 if __name__ == "__main__":

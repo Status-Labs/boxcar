@@ -30,6 +30,14 @@ Activities (above) instead.
 Focus the address bar with **ctrl-l**, type the URL, press enter.
 New tab **ctrl-t**, find on page **ctrl-f**, close tab **ctrl-w**, reload **f5**.
 
+## Filling in web forms (do this to avoid typos)
+1. **Click the field** before typing into it.
+2. To replace text already in a field, click it, press **ctrl-a** (select all),
+   then type the new value — don't backspace character by character.
+3. Use **tab** to move to the next field, or click it.
+4. When all fields are filled, click the form's button (e.g. "Sign in",
+   "Save draft"). Verify with a screenshot before moving on.
+
 ## Filesystem
 Home is `/home/user`; the Desktop is `~/Desktop`.
 

@@ -83,10 +83,11 @@ class AnthropicBackend:
 
 # ============================================================= OpenAI / compatible
 class OpenAIBackend:
-    def __init__(self, system, tools, task, model, base_url=None):
+    def __init__(self, system, tools, task, model, base_url=None, reasoning_effort=None):
         import openai
         self.client = openai.OpenAI(base_url=base_url) if base_url else openai.OpenAI()
         self.model = model
+        self.reasoning_effort = reasoning_effort  # set for GPT-5 / o-series
         self.tools = [{"type": "function", "function": {
             "name": t["name"], "description": t["description"],
             "parameters": t["parameters"]}} for t in tools]
@@ -107,9 +108,10 @@ class OpenAIBackend:
                     parts.append({"type": "image_url", "image_url": {"url": _data_uri(p)}})
                 self.messages.append({"role": "user", "content": parts})
 
+        extra = {"reasoning_effort": self.reasoning_effort} if self.reasoning_effort else {}
         resp = self.client.chat.completions.create(
             model=self.model, messages=self.messages,
-            tools=self.tools, tool_choice="auto",
+            tools=self.tools, tool_choice="auto", **extra,
         )
         msg = resp.choices[0].message
         assistant = {"role": "assistant", "content": msg.content}
@@ -131,7 +133,9 @@ def make_backend(provider, system, tools, task):
         return AnthropicBackend(system, tools, task,
                                 os.getenv("ANTHROPIC_MODEL", "claude-opus-4-8"))
     if provider == "openai":
-        return OpenAIBackend(system, tools, task,
-                             os.getenv("OPENAI_MODEL", "gpt-4o"),
-                             os.getenv("OPENAI_BASE_URL"))
+        model = os.getenv("OPENAI_MODEL", "gpt-4o")
+        reasoning = model.startswith(("gpt-5", "o1", "o3", "o4"))
+        eff = os.getenv("OPENAI_REASONING_EFFORT", "low") if reasoning else None
+        return OpenAIBackend(system, tools, task, model,
+                             os.getenv("OPENAI_BASE_URL"), eff)
     raise SystemExit(f"unknown provider: {provider!r} (use 'anthropic' or 'openai')")

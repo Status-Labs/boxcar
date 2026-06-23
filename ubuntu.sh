@@ -109,7 +109,7 @@ QEMU=(qemu-system-x86_64
   -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2223-:22
   -device virtio-net-pci,netdev=net0
   -vga std
-  -display gtk
+  "${DISPLAY_ARGS[@]}"
   -usb -device usb-tablet
   -rtc base=utc
   -qmp unix:"$MON_SOCK",server,nowait

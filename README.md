@@ -18,6 +18,9 @@ Each VM is a single script. Disks, UEFI vars, and TPM state live in `vms/`.
 | `control/optimize.py`| DSPy optimizer pass — tunes the agent's policy (per-OS) |
 | `control/os_context.py`| Loads the per-OS agent guide (single source of truth) |
 | `control/guides/*.md`| Editable OS "user guides" given to the agent as context |
+| `scenarios/webmail/`| Self-contained demo: log in + draft an email reply    |
+| `scenarios/download/`| Cross-app demo: browser download → process in the shell |
+| `scenarios/invoices/`| Read→extract→act demo: find the overdue row, act on it |
 | `control/backends.py`| LLM provider adapters (Anthropic / OpenAI / compat) |
 | `isos/`           | Installer ISOs (git-ignored)                         |
 | `vms/<type>/`     | Per-VM state: `disk.qcow2`, `vars.fd`, `tpm/`, `base.qcow2`, `clones/` |
@@ -303,6 +306,26 @@ Override resources with env vars, e.g.:
 ```bash
 RAM=12G CPUS=8 ./win11.sh
 ```
+
+### Run headless (in the background, hands-free)
+
+The agent never uses your real mouse/keyboard — QMP injects input into the VM's
+*virtual* devices, and `screendump` reads the framebuffer directly. The only
+reason you see activity is the QEMU window. Set `DISPLAY_MODE` to run with **no
+window at all**, so a VM/agent works in the background while you keep using your
+machine:
+
+```bash
+DISPLAY_MODE=none ./spawn.sh ubuntu work1     # headless — no window, full agent
+DISPLAY_MODE=vnc  ./spawn.sh ubuntu work1     # headless but watchable via VNC
+RAM=12G ./win11.sh                            # also honored by win11.sh / ubuntu.sh
+```
+
+- `gtk` (default) — shows a window on your desktop.
+- `none` — **headless**: no window, runs in the background. Agent works unchanged
+  (verified: `screendump` + SSH function with no display).
+- `vnc` — headless but viewable: connect a VNC client to `127.0.0.1:5900`
+  (`+VNC_DISPLAY`) to watch; it won't grab your input.
 
 ## Notes
 
