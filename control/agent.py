@@ -19,6 +19,7 @@ Provider: --provider anthropic|openai (or AGENT_PROVIDER in .env).
 """
 import os
 import sys
+import time
 
 from backends import ToolObservation, make_backend
 from config import load_env
@@ -150,16 +151,27 @@ def main():
     backend = make_backend(provider, system_prompt(target, w, h), tools, task)
 
     observations = None
+    t_start = time.perf_counter()
+    t_llm = t_obs = 0.0
+    steps = 0
     while True:
+        c0 = time.perf_counter()
         text, calls, done = backend.step(observations)
+        t_llm += time.perf_counter() - c0
+        steps += 1
         if text:
             print(f"\nLLM: {text}")
         for c in calls:
             print(f"  -> {c.name}({c.args})")
         if done or not calls:
             break
+        a0 = time.perf_counter()
         observations = [run_tool(vm, c) for c in calls]
+        t_obs += time.perf_counter() - a0
 
+    total = time.perf_counter() - t_start
+    print(f"\n[timing] {steps} steps in {total:.1f}s "
+          f"(avg {total / max(steps, 1):.1f}s/step) | model {t_llm:.1f}s | vm {t_obs:.1f}s")
     vm.close()
 
 
