@@ -75,7 +75,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path in ("/", "/login"):
             if self._authed():
                 return self._redirect("/inbox")
-            return self._send(render("Sign in",
+            return self._send(render(
+                "Sign in",
                 "<h2>Sign in to DemoMail</h2>"
                 "<form method=post action=/login>"
                 "<label>Username</label><input name=username autofocus>"
@@ -84,14 +85,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not self._authed():
             return self._redirect("/")
         if path == "/inbox":
-            return self._send(render("Inbox",
+            return self._send(render(
+                "Inbox",
                 "<h2>Inbox</h2><a href=/message>"
                 f"<div class=row><div class=from>{EMAIL['from']}</div>"
                 f"<div class=sub>{EMAIL['subject']}</div></div></a>"))
         if path in ("/message", "/compose"):
             # Email shown with an inline reply box right below (Gmail-style), so
             # replying is: read -> type in the box -> Save draft.
-            return self._send(render(EMAIL["subject"],
+            return self._send(render(
+                EMAIL["subject"],
                 f"<h2>{EMAIL['subject']}</h2><p><b>From:</b> {EMAIL['from']}</p>"
                 f"<pre>{EMAIL['body']}</pre>"
                 "<h3>Reply</h3><form method=post action=/draft>"
@@ -103,19 +106,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "<button type=submit>Save draft</button></form>"))
         if path == "/drafts":
             data = json.load(open(DRAFTS)) if os.path.exists(DRAFTS) else []
-            return self._send(render("Drafts",
+            return self._send(render(
+                "Drafts",
                 "<h2>Saved drafts</h2><pre>" + json.dumps(data, indent=2) + "</pre>"))
         return self._send(render("404", "Not found"), 404)
 
     def do_POST(self):
         n = int(self.headers.get("Content-Length", 0))
         form = urllib.parse.parse_qs(self.rfile.read(n).decode())
+
         def g(k):
             return form.get(k, [""])[0]
         if self.path == "/login":
             if g("username") == USER and g("password") == PW:
                 return self._redirect("/inbox", {"Set-Cookie": "sid=ok; Path=/"})
-            return self._send(render("Sign in",
+            return self._send(render(
+                "Sign in",
                 "<p>Invalid login.</p><a href=/>Try again</a>"))
         if self.path == "/draft":
             if not self._authed():
@@ -123,7 +129,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             drafts = json.load(open(DRAFTS)) if os.path.exists(DRAFTS) else []
             drafts.append({"to": g("to"), "subject": g("subject"), "body": g("body")})
             json.dump(drafts, open(DRAFTS, "w"), indent=2)
-            return self._send(render("Saved",
+            return self._send(render(
+                "Saved",
                 "<h2>Draft saved &#10003;</h2>"
                 f"<pre>{g('body')}</pre>"
                 "<a href=/inbox><button>Back to inbox</button></a>"))

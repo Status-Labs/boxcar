@@ -100,6 +100,7 @@ DATA = [
     ex("windows_login.png", "win11", "Sign in to Windows.", ["left_click", "type_text"]),
 ]
 
+
 def split(data):
     """Interleaved 1/3 dev split (keeps task-type variety in both)."""
     dev = data[::3]

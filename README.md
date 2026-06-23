@@ -1,6 +1,31 @@
-# QEMU VMs — Windows 11 & Ubuntu Desktop
+# 🚃 Boxcar
 
-Simple QEMU/KVM setup to run a Windows 11 VM and an Ubuntu Desktop VM.
+**A disposable desktop sandbox where LLM agents drive a real Windows 11 or Ubuntu machine.**
+
+[![CI](https://github.com/shpeedle/boxcar/actions/workflows/ci.yml/badge.svg)](https://github.com/shpeedle/boxcar/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+
+Boxcar is a single-script QEMU/KVM setup that boots a Windows 11 or Ubuntu
+Desktop VM, then hands the keyboard, mouse, and shell to an LLM so it can
+complete real GUI tasks on its own (computer-use). Bake a provisioned VM into a
+golden image once and **spawn fresh, disposable instances in seconds** as
+copy-on-write overlays — each one a clean, throwaway "boxcar" for an agent to
+work in.
+
+**Highlights**
+
+- 🖥️ **One script per VM** — `./win11.sh` / `./ubuntu.sh`, fully unattended installs.
+- 🤖 **Provider-agnostic agent** — Anthropic, OpenAI, or any OpenAI-compatible
+  endpoint; Windows (PowerShell/SSH) and Ubuntu (bash) targets.
+- ⚡ **Golden images** — bake once, spawn disposable CoW clones in milliseconds.
+- 🧠 **DSPy variant** — an optimizable policy you can compile per-OS.
+- ♿ **Accessibility trees** — opt-in AT-SPI / UI Automation grounding (`--a11y`).
+- 🎬 **Ready-made scenarios** — webmail, download, and invoices demo tasks.
+
+> ⚠️ Boxcar lets an LLM run arbitrary commands and control a desktop inside a VM.
+> The VM is a sandbox, not a hardened security boundary — see [SECURITY.md](SECURITY.md).
+
 Each VM is a single script. Disks, UEFI vars, and TPM state live in `vms/`.
 
 ## What's included
@@ -333,3 +358,14 @@ RAM=12G ./win11.sh                            # also honored by win11.sh / ubunt
   no root needed. The host can't reach the VM by IP directly.
 - Mouse is an absolute USB tablet, so the pointer tracks without grabbing.
 - Release the keyboard/mouse grab (if any) with **Ctrl+Alt+G**.
+
+## Contributing
+
+Contributions are welcome — bug reports, docs, new scenarios, provider backends,
+and OS-guide recipes. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and the PR
+checklist, and please follow our [Code of Conduct](CODE_OF_CONDUCT.md). Found a
+security issue? See [SECURITY.md](SECURITY.md).
+
+## License
+
+[MIT](LICENSE) © Ben Siewert
