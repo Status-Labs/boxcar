@@ -101,7 +101,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         log = json.load(open(LOG)) if os.path.exists(LOG) else []
         log.append({"customer": name})
         json.dump(log, open(LOG, "w"), indent=2)
-        return self._send(render("Sent",
+        return self._send(render(
+            "Sent",
             f"<h2>Reminder sent to {name or '(blank)'} &#10003;</h2>"
             "<a href=/><button>Back</button></a>"))
 

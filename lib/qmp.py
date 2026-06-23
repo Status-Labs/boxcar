@@ -25,7 +25,8 @@ def connect(path, timeout=60):
 
 def main():
     if len(sys.argv) < 3:
-        print(__doc__); return 1
+        print(__doc__)
+        return 1
     sock_path, cmd = sys.argv[1], sys.argv[2]
     s = connect(sock_path)
     if s is None:
@@ -33,8 +34,10 @@ def main():
         return 0  # don't fail the VM launch
     f = s.makefile("rw")
     f.readline()  # greeting
+
     def call(obj):
-        f.write(json.dumps(obj) + "\n"); f.flush()
+        f.write(json.dumps(obj) + "\n")
+        f.flush()
         return f.readline()
     call({"execute": "qmp_capabilities"})
 
@@ -68,7 +71,8 @@ def main():
             call({"execute": "send-key", "arguments": {"keys": keys}})
             time.sleep(0.04)
     else:
-        print(__doc__); return 1
+        print(__doc__)
+        return 1
     return 0
 
 
