@@ -24,7 +24,7 @@ You need a Linux host with KVM (`/dev/kvm`), `qemu-system-x86_64`, `qemu-img`,
 full list and the installer ISOs.
 
 ```bash
-git clone https://github.com/<your-username>/boxcar.git
+git clone https://github.com/Status-Labs/boxcar.git
 cd boxcar/control
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
