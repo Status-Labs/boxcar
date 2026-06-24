@@ -1,5 +1,9 @@
 # Shared QEMU helpers and config. Sourced by win11.sh and ubuntu.sh.
 # Not meant to be run directly.
+# shellcheck shell=bash
+# These vars are consumed by the scripts that source this file, so shellcheck
+# can't see their use from here:
+# shellcheck disable=SC2034
 
 set -euo pipefail
 
