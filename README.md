@@ -2,7 +2,7 @@
 
 **A disposable desktop sandbox where LLM agents drive a real Windows 11 or Ubuntu machine.**
 
-[![CI](https://github.com/shpeedle/boxcar/actions/workflows/ci.yml/badge.svg)](https://github.com/shpeedle/boxcar/actions/workflows/ci.yml)
+[![CI](https://github.com/Status-Labs/boxcar/actions/workflows/ci.yml/badge.svg)](https://github.com/Status-Labs/boxcar/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
