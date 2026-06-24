@@ -26,12 +26,14 @@ jobs:
         run: python -m compileall -q control scenarios lib config/ubuntu
 
   shellcheck:
-    name: Shellcheck (advisory)
+    name: Shellcheck
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Run shellcheck
+        # SC2054 is excluded: our QEMU arg arrays contain option tokens with
+        # intentional internal commas (e.g. `-machine q35,smm=on`), which the
+        # check misreads as array-element separators.
         run: |
           sudo apt-get update && sudo apt-get install -y shellcheck
-          shellcheck -S warning *.sh lib/*.sh
+          shellcheck -S warning -e SC2054 *.sh lib/*.sh

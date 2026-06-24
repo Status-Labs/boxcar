@@ -69,6 +69,8 @@ fi
 
 rm -f "$MON_SOCK"
 
+# tpm_args prints space-separated flags we intend to word-split into the array.
+# shellcheck disable=SC2207
 QEMU=(qemu-system-x86_64
   -name "$NAME"
   "${KVM_ARGS[@]}"
