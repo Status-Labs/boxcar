@@ -41,7 +41,10 @@ if [ -f "$DESKTOP" ]; then
 fi
 
 echo "=== accessibility (AT-SPI) tooling for the agent's ui_tree() ==="
-apt-get install -y python3-pyatspi
+# python3-pyatspi: the AT-SPI tree. xdotool + x11-utils (xprop): used to recover
+# GTK4/libadwaita "bogus (0,0)" widget rects from X11 window geometry +
+# _GTK_FRAME_EXTENTS (see config/ubuntu/atspi_helper.py). Needs the Xorg session.
+apt-get install -y python3-pyatspi xdotool x11-utils
 
 echo "=== GDM: Xorg, password login (keeps the keyring encrypted) ==="
 # Deliberately NO autologin: password login lets pam_gnome_keyring create and
