@@ -31,9 +31,9 @@ import sys
 
 import dspy
 
-from agent_dspy import NextAction, make_lm, to_qcodes
 from config import load_env
 from os_context import guidance
+from policy import NextAction, make_lm, to_qcodes
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCREENS = os.path.join(HERE, "optim", "screens")
@@ -98,6 +98,28 @@ DATA = [
     # Login screens -> click the user / type the password
     ex("ubuntu_login.png", "ubuntu", "Log in to the machine.", ["left_click", "type_text"]),
     ex("windows_login.png", "win11", "Sign in to Windows.", ["left_click", "type_text"]),
+    # ---- Workflow decision-points (from the scenario suite) ------------------
+    # The web-app scenarios (signup/triage/expense/webmail/invoices) all begin the
+    # same reliable way: from the desktop, open the browser with `super`; on a
+    # browser page, go to a URL with `ctrl-l`. Reinforce that the *first* action of
+    # a "open <url> and do X" task is the keyboard, not a coordinate guess.
+    ex("ubuntu_desktop.png", "ubuntu", "Open the sign-up page at http://10.0.2.2:8003.",
+       ["key"], "super"),
+    ex("ubuntu_desktop.png", "ubuntu", "Open the issue tracker to triage a ticket.",
+       ["key"], "super"),
+    ex("ubuntu_desktop.png", "ubuntu", "Open the expense dashboard in the browser.",
+       ["key"], "super"),
+    ex("ubuntu_desktop.png", "ubuntu", "Open the Text Editor to write a note.",
+       ["key"], "super"),
+    ex("ubuntu_desktop.png", "ubuntu", "Open Settings to change the appearance.",
+       ["key"], "super"),
+    ex("chrome_page.png", "ubuntu", "Go to the sign-up wizard at http://10.0.2.2:8003.",
+       ["key"], "ctrl-l"),
+    ex("chrome_page.png", "ubuntu", "Open the expense dashboard at http://10.0.2.2:8005.",
+       ["key"], "ctrl-l"),
+    ex("chrome_page.png", "ubuntu", "Reload the current page.", ["key"], "f5"),
+    ex("chrome_win.png", "win11", "Open the company dashboard at http://10.0.2.2:8005.",
+       ["key"], "ctrl-l"),
 ]
 
 
@@ -127,11 +149,21 @@ def metric(example, pred, trace=None):
     return True
 
 
-def run_one(target, method, eval_only):
+def run_one(target, method, eval_only, with_rollouts=True):
     """Optimize (or just evaluate) the policy for ONE OS, saving a per-OS artifact
-    so Windows and Ubuntu get independently-tuned programs."""
+    so Windows and Ubuntu get independently-tuned programs.
+
+    If demos have been harvested from successful end-to-end rollouts
+    (bootstrap_rollouts.py), they are mixed into the trainset — so the optimizer
+    learns from real verified behavior, not just the hand-labeled screens."""
     data = [e for e in DATA if e.target == target]
     train, dev = split(data)
+    if with_rollouts:
+        from bootstrap_rollouts import load_rollout_demos
+        extra = load_rollout_demos(target)
+        if extra:
+            print(f"[{target}] + {len(extra)} demos from successful rollouts")
+            train = train + extra
     evaluate = dspy.Evaluate(devset=dev, metric=metric,
                              num_threads=1, display_progress=False)
     base = dspy.Predict(NextAction)
@@ -160,7 +192,7 @@ def main():
     load_env()
     argv = sys.argv[1:]
     provider = os.getenv("AGENT_PROVIDER", "anthropic")
-    method, target, eval_only = "mipro", "all", False
+    method, target, eval_only, with_rollouts = "mipro", "all", False, True
     while argv:
         if argv[0] == "--provider":
             provider, argv = argv[1], argv[2:]
@@ -170,6 +202,8 @@ def main():
             target, argv = argv[1], argv[2:]
         elif argv[0] == "--eval-only":
             eval_only, argv = True, argv[1:]
+        elif argv[0] == "--no-rollouts":   # ignore harvested rollout demos
+            with_rollouts, argv = False, argv[1:]
         else:
             argv = argv[1:]
     dspy.configure(lm=make_lm(provider))
@@ -178,7 +212,7 @@ def main():
     targets = [target] if target in ("win11", "ubuntu") else ["ubuntu", "win11"]
     print(f"[optimize | {provider} | {method}]  targets={targets}")
     for t in targets:
-        run_one(t, method, eval_only)
+        run_one(t, method, eval_only, with_rollouts=with_rollouts)
 
 
 if __name__ == "__main__":

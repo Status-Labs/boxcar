@@ -20,8 +20,12 @@ work in.
   endpoint; Windows (PowerShell/SSH) and Ubuntu (bash) targets.
 - ⚡ **Golden images** — bake once, spawn disposable CoW clones in milliseconds.
 - 🧠 **DSPy variant** — an optimizable policy you can compile per-OS.
+- 📊 **Scored benchmark suite** — 8 real tasks with verifiable end-states, an
+  end-to-end eval runner (scorecard + JSON report), and a rollout-bootstrapping
+  optimizer. See [docs/evals.md](docs/evals.md).
 - ♿ **Accessibility trees** — opt-in AT-SPI / UI Automation grounding (`--a11y`).
-- 🎬 **Ready-made scenarios** — webmail, download, and invoices demo tasks.
+- 🎬 **Ready-made scenarios** — webmail, downloads, invoices, a multi-page sign-up
+  wizard, issue triage, expense reporting, and desktop-app tasks.
 
 > ⚠️ Boxcar lets an LLM run arbitrary commands and control a desktop inside a VM.
 > The VM is a sandbox, not a hardened security boundary — see [SECURITY.md](SECURITY.md).
@@ -39,13 +43,24 @@ Each VM is a single script. Disks, UEFI vars, and TPM state live in `vms/`.
 | `lib/qmp.py`      | QMP helper (auto-keypress, screenshots)              |
 | `control/winvm.py`| Python library to fully control the Windows VM       |
 | `control/agent.py`| Let an LLM drive the VM autonomously (computer-use)  |
-| `control/agent_dspy.py`| Same agent built with DSPy (Signatures + LiteLLM) |
-| `control/optimize.py`| DSPy optimizer pass — tunes the agent's policy (per-OS) |
+| `control/agent_dspy.py`| Same agent built with DSPy (CLI over `policy` + `runner`) |
+| `control/policy.py`| DSPy Signatures, action execution, LM + decider construction |
+| `control/runner.py`| The look→act→look loop (`run_agent`) returning a scored `RunResult` |
+| `control/evals.py`| **End-to-end benchmark**: drive the scenario suite on a VM, score it, scorecard |
+| `control/optimize.py`| Compile-time optimizer — tunes the agent's policy (per-OS) |
+| `control/bootstrap_rollouts.py`| Harvest demos from *passing* runs → back into the optimizer |
 | `control/os_context.py`| Loads the per-OS agent guide (single source of truth) |
 | `control/guides/*.md`| Editable OS "user guides" given to the agent as context |
+| `scenarios/framework.py`| Scenario spec (`task`/`setup`/`check`) + in-process host server |
+| `scenarios/registry.py`| Discovers every scenario; `select()` by name/target/tag |
 | `scenarios/webmail/`| Self-contained demo: log in + draft an email reply    |
 | `scenarios/download/`| Cross-app demo: browser download → process in the shell |
 | `scenarios/invoices/`| Read→extract→act demo: find the overdue row, act on it |
+| `scenarios/signup/`| Multi-page web wizard: Account → Profile → Review → Create |
+| `scenarios/triage/`| Reason over tickets → pick the critical one → set a `<select>` |
+| `scenarios/expense/`| Read a budget table → compute the overage → file a report |
+| `scenarios/editor/`| Desktop app: Text Editor → type content → Save As to a path |
+| `scenarios/settings/`| Desktop app: Settings → Appearance → Dark (verified via `gsettings`) |
 | `control/backends.py`| LLM provider adapters (Anthropic / OpenAI / compat) |
 | `isos/`           | Installer ISOs (git-ignored)                         |
 | `vms/<type>/`     | Per-VM state: `disk.qcow2`, `vars.fd`, `tpm/`, `base.qcow2`, `clones/` |
@@ -60,6 +75,24 @@ Each VM is a single script. Disks, UEFI vars, and TPM state live in `vms/`.
   - `ubuntu-24.04.4-desktop-amd64.iso`
 
 ## Usage
+
+A **`Makefile`** wraps the common flows so you don't have to retype the
+`VM_SSH_PORT=… VM_QMP_SOCK=…` env vars — it derives the SSH port and QMP socket
+from a clone's name. `make help` lists everything; the essentials:
+
+```bash
+make up                      # spawn a fresh disposable ubuntu clone "eval" (background)
+make eval                    # run the whole scored scenario suite against it
+make eval SCENARIO=webmail EVAL_ARGS=--trace   # one scenario, save step screenshots
+make agent TASK="open a terminal and report the date"
+make recreate                # tear down + bring back a clean clone
+make down                    # stop it
+make test                    # host-only scenario tests (no VM)
+make lint                    # flake8 + compileall (mirrors CI)
+```
+
+Override `TARGET=win11`, `NAME=<instance>`, or `PROVIDER=openai` on any target.
+The raw scripts below still work if you prefer them.
 
 First time (boots the installer ISO):
 
@@ -263,6 +296,26 @@ Takeaways:
   per call**, vs BootstrapFewShot's ~500K (demo screenshots inlined). With the
   guides in place, gpt-4o already scores 100% here, so there's nothing left to
   optimize; grow `DATA` (and try `--provider anthropic`) to find new headroom.
+
+#### End-to-end benchmark + rollout loop (`control/evals.py`)
+
+`optimize.py` grades a *single action* against a label — a cheap proxy. The
+**benchmark** grades the whole task: `evals.py` drives the agent through the
+[scenario suite](docs/evals.md) on a live VM and scores each run by its
+**verifiable end state** (a saved draft, a created account, a flipped setting),
+emitting a scorecard + JSON report. The same suite is exposed as a `dspy.Evaluate`
+program, so end-to-end success is a first-class DSPy metric, not just the proxy.
+
+```bash
+# whole Ubuntu suite against a spawned VM (compiled policy auto-loaded)
+control/.venv/bin/python control/evals.py --target ubuntu
+control/.venv/bin/python control/evals.py --target ubuntu --scenario webmail,signup
+```
+
+`bootstrap_rollouts.py` closes the loop: it runs the suite and harvests each step
+of every **passing** run as a labeled demo, which folds back into `optimize.py`'s
+trainset. The cycle is **measure → harvest wins → compile → measure again**. Full
+details, flags, and how to add a scenario: **[docs/evals.md](docs/evals.md)**.
 
 ### Accessibility tree (`--a11y`)
 
