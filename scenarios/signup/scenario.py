@@ -53,5 +53,8 @@ def check(ctx: ScenarioContext, vm) -> CheckResult:
 SCENARIO = Scenario(
     name="signup", target="ubuntu", task=task, check=check, setup=setup,
     teardown=lambda ctx, vm: ctx.stop(), port=8003, tags=("web", "multi-page"),
+    # The longest flow: 3 pages x several fields + a checkbox + submit. Give it
+    # more headroom than the 40-step default so it isn't cut off mid-wizard.
+    max_steps=60,
     summary="navigate a 3-page wizard, fill fields per page, tick terms, submit",
 )

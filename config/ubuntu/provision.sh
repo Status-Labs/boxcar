@@ -26,7 +26,9 @@ cat > /etc/opt/chrome/policies/managed/agent.json <<'EOF'
   "SyncDisabled": true,
   "DefaultBrowserSettingEnabled": false,
   "PromotionalTabsEnabled": false,
-  "MetricsReportingEnabled": false
+  "MetricsReportingEnabled": false,
+  "PasswordManagerEnabled": false,
+  "PasswordLeakDetectionEnabled": false
 }
 EOF
 # Belt-and-suspenders: also bake --no-first-run / --no-default-browser-check into

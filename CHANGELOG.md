@@ -56,3 +56,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `curl …/sales.csv` saved HTML and summed to a bogus 0.0. The CSV is now served
   at `/sales.csv` too and unknown paths 404; the check reports an HTML-not-CSV
   download explicitly.
+- **Form-interaction hardening** (from end-to-end run traces; suite now 8/8 on
+  gpt-5 at `reasoning_effort=medium`):
+  - Chrome "Save password?" prompt interrupted multi-page form flows —
+    `provision.sh` policy now sets `PasswordManagerEnabled: false`.
+  - The guide's form-filling section now teaches type-after-one-click, Tab
+    between fields, and a GTK `Ctrl+L` Save-As recipe (fixed the editor scenario).
+  - `signup` made agent-friendly per the project's "one unambiguous target"
+    principle: autofocus the first field of each wizard step, a large clickable
+    terms row instead of a bare checkbox, and a 60-step budget for the longest flow.

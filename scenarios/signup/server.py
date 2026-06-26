@@ -38,8 +38,10 @@ button{margin-top:22px;background:#5b3fd6;color:#fff;border:0;padding:14px 28px;
 font-size:17px;border-radius:6px;cursor:pointer}
 .steps{color:#6a7790;font-size:14px;margin-bottom:6px}
 .rev{background:#f6f8fb;padding:16px;border-radius:6px}
-.rev div{margin:6px 0}.chk{display:flex;align-items:center;gap:10px;margin-top:18px}
-.chk input{width:auto}.chk label{margin:0}
+.rev div{margin:6px 0}
+.chk{display:flex;align-items:center;gap:12px;margin-top:18px;padding:14px 16px;
+border:1px solid #cdd6e4;border-radius:8px;cursor:pointer;font-size:17px;font-weight:bold}
+.chk input{width:24px;height:24px;flex:none}
 """
 
 
@@ -59,9 +61,12 @@ def esc(s):
     return (s or "").replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;")
 
 
-def field(name, label, value="", typ="text"):
+def field(name, label, value="", typ="text", autofocus=False):
+    # Autofocus the first field of each step so the agent (and a human) can type
+    # immediately — no miss-prone click needed to focus it.
+    af = " autofocus" if autofocus else ""
     return (f'<label>{label}</label>'
-            f'<input name={name} type={typ} value="{esc(value)}" autocomplete=off>')
+            f'<input name={name} type={typ} value="{esc(value)}" autocomplete=off{af}>')
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -86,7 +91,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "Step 1 — Account",
             "<div class=steps>Step 1 of 3 — Account</div><h2>Create your account</h2>"
             "<form method=post action=/profile>"
-            + field("username", "Username", d.get("username", ""))
+            + field("username", "Username", d.get("username", ""), autofocus=True)
             + field("email", "Email", d.get("email", ""))
             + field("password", "Password", d.get("password", ""), "password")
             + "<button type=submit>Next: Profile</button></form>"))
@@ -98,7 +103,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "<div class=steps>Step 2 of 3 — Profile</div><h2>Tell us about you</h2>"
             "<form method=post action=/review>"
             + hidden(d, ACCOUNT_FIELDS)
-            + field("full_name", "Full name", d.get("full_name", ""))
+            + field("full_name", "Full name", d.get("full_name", ""), autofocus=True)
             + field("company", "Company", d.get("company", ""))
             + field("role", "Role", d.get("role", ""))
             + "<button type=submit>Next: Review</button></form>"))
@@ -115,8 +120,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             f"<div class=rev>{rows}</div>"
             "<form method=post action=/create>"
             + hidden(d, ALL_FIELDS)
-            + "<div class=chk><input type=checkbox name=agree value=yes id=agree>"
-              "<label for=agree>I agree to the terms of service</label></div>"
+            # Whole row is the <label>, so a click anywhere on it toggles the box —
+            # a large, unambiguous target instead of a tiny checkbox.
+            + "<label class=chk><input type=checkbox name=agree value=yes> "
+              "I agree to the terms of service</label>"
             "<button type=submit>Create account</button></form>"))
 
     def do_GET(self):

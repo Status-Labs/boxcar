@@ -88,7 +88,7 @@ def run_agent(vm, target, decide, task, *, a11y=False, max_steps=40,
 
     res = RunResult(task=task, target=target, usage_since=_lm_history_len())
     history_lines: list[str] = []
-    prev_sig, repeats = None, 0
+    prev_sig, repeats, clicks_no_type = None, 0, 0
     t_start = time.perf_counter()
     for i in range(max_steps):
         c0 = time.perf_counter()
@@ -123,19 +123,28 @@ def run_agent(vm, target, decide, task, *, a11y=False, max_steps=40,
             res.done = True
             res.final_note = step.note
             break
-        # Stall detection: count consecutive identical (tool, args) decisions.
+        # Stall detection, two signals:
+        #  (1) the same (tool,args) chosen repeatedly — a hard no-op loop;
+        #  (2) consecutive coordinate-clicks with no typing in between — the
+        #      "field-focus thrash" failure (re-clicking a form field at slightly
+        #      different coords forever), which (1) misses because the args vary.
         sig = (step.tool, step.args)
         repeats = repeats + 1 if sig == prev_sig else 1
         prev_sig = sig
+        if step.tool in ("left_click", "double_click"):
+            clicks_no_type += 1
+        elif step.tool in ("type_text", "key", "run_bash", "run_powershell"):
+            clicks_no_type = 0
 
         a0 = time.perf_counter()
         step.obs = execute(vm, target, step.tool, parse_args(step.args))
         res.vm_s += time.perf_counter() - a0
 
-        if repeats >= stall_abort:
+        if repeats >= stall_abort or clicks_no_type >= stall_abort:
             res.stuck = True
-            res.final_note = (f"aborted (stuck): repeated `{step.tool} {step.args}` "
-                              f"{repeats}x with no progress")
+            why = (f"repeated `{step.tool} {step.args}` {repeats}x" if repeats >= stall_abort
+                   else f"clicked {clicks_no_type}x without typing")
+            res.final_note = f"aborted (stuck): {why} with no progress"
             if verbose:
                 print(f"[stall] {res.final_note} — giving up early")
             res.steps.append(step)
@@ -145,6 +154,12 @@ def run_agent(vm, target, decide, task, *, a11y=False, max_steps=40,
                          "a row and it is NOT working. Do NOT repeat it — switch "
                          "methods (e.g. if a page won't load, use run_bash/curl or the "
                          "shell; otherwise try a different element or action).")
+        elif clicks_no_type >= stall_warn:
+            step.obs += (f"  ⚠ You have clicked {clicks_no_type}x without typing. After "
+                         "clicking a field ONCE, your next action should be type_text. "
+                         "The first form field is usually already focused — just type. "
+                         "If a click isn't landing, press Tab to move between fields "
+                         "instead of re-clicking.")
         res.steps.append(step)
         history_lines.append(f"{i}. {step.tool} {step.args} -> {step.obs[:300]}")
 
