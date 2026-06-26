@@ -29,6 +29,11 @@ Activities (above) instead.
 ## Web browsing (Google Chrome)
 Focus the address bar with **ctrl-l**, type the URL, press enter.
 New tab **ctrl-t**, find on page **ctrl-f**, close tab **ctrl-w**, reload **f5**.
+If a first-run **"Sign in to Chrome"** dialog covers the window, the address bar
+is hidden — click **"Stay signed out"** to dismiss it first. If `ctrl-l` doesn't
+visibly focus an address bar after one try, a dialog is blocking it: dismiss the
+dialog (or, for a download/fetch, just use `run_bash` with `curl` instead of the
+browser). Never press `ctrl-l` repeatedly — if it didn't work once, change tack.
 
 ## Filling in web forms (do this to avoid typos)
 1. **Click the field** before typing into it.

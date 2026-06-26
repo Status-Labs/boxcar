@@ -29,6 +29,14 @@ cat > /etc/opt/chrome/policies/managed/agent.json <<'EOF'
   "MetricsReportingEnabled": false
 }
 EOF
+# Belt-and-suspenders: also bake --no-first-run / --no-default-browser-check into
+# every launcher Exec line. GNOME Activities opens Chrome via this .desktop (not a
+# flagged command), so this guarantees a fresh profile skips the first-run "Sign in
+# to Chrome" modal even if the managed policy above is ever absent.
+DESKTOP=/usr/share/applications/google-chrome.desktop
+if [ -f "$DESKTOP" ]; then
+  sed -i -E 's#^Exec=(/usr/bin/google-chrome-stable|/opt/google/chrome/google-chrome)#Exec=\1 --no-first-run --no-default-browser-check#' "$DESKTOP"
+fi
 
 echo "=== accessibility (AT-SPI) tooling for the agent's ui_tree() ==="
 apt-get install -y python3-pyatspi

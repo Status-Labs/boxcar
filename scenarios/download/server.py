@@ -45,19 +45,30 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
-    def do_GET(self):
-        if self.path == "/download":
-            body = CSV.encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "text/csv")
-            self.send_header("Content-Disposition", 'attachment; filename="sales.csv"')
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-            return
-        body = PAGE.encode()
+    def _send(self, body, ctype, headers=None):
         self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        for k, v in (headers or {}).items():
+            self.send_header(k, v)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        path = self.path.split("?", 1)[0]
+        # Serve the CSV at /download (the button) AND /sales.csv (the obvious
+        # guess, matching the filename in the task) so a shell `curl .../sales.csv`
+        # gets the real file rather than the HTML page.
+        if path in ("/download", "/sales.csv"):
+            return self._send(CSV.encode(), "text/csv",
+                              {"Content-Disposition": 'attachment; filename="sales.csv"'})
+        if path in ("/", "/index.html"):
+            return self._send(PAGE.encode(), "text/html; charset=utf-8")
+        # 404 unknown paths — don't silently return HTML for a wrong URL, which
+        # otherwise gets saved as "sales.csv" and parsed to a bogus 0.0 total.
+        body = b"not found\n"
+        self.send_response(404)
+        self.send_header("Content-Type", "text/plain")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
