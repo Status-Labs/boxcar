@@ -48,7 +48,7 @@ REPORTS = os.path.join(_HERE, "optim", "reports")
 
 
 def run_scenario(vm, target, decide, scenario, *, max_steps=None, trace_dir=None,
-                 verbose=True, collect=False):
+                 verbose=True, collect=False, a11y=False):
     """Run one scenario end to end on `vm` and return a result dict.
 
     collect=True attaches the live RunResult under the "_res" key (in-process only,
@@ -65,7 +65,7 @@ def run_scenario(vm, target, decide, scenario, *, max_steps=None, trace_dir=None
         if verbose:
             print(f"\n=== {scenario.name} ===\n{task}\n")
         sdir = os.path.join(trace_dir, scenario.name) if trace_dir else None
-        res = run_agent(vm, target, decide, task,
+        res = run_agent(vm, target, decide, task, a11y=a11y,
                         max_steps=max_steps or scenario.max_steps,
                         trace_dir=sdir, verbose=verbose)
         verdict = scenario.check(ctx, vm)
@@ -140,16 +140,16 @@ class ScenarioRunner(dspy.Module):
     `scenario_metric` and a devset of scenario names to get a `dspy.Evaluate`
     over true task success — the end-to-end counterpart to optimize.py's proxy."""
 
-    def __init__(self, vm, target, decide, max_steps=None, trace_dir=None):
+    def __init__(self, vm, target, decide, max_steps=None, trace_dir=None, a11y=False):
         super().__init__()
         self.vm, self.target, self.decide = vm, target, decide
-        self.max_steps, self.trace_dir = max_steps, trace_dir
+        self.max_steps, self.trace_dir, self.a11y = max_steps, trace_dir, a11y
 
     def forward(self, scenario_name):
         sc = registry.get(scenario_name)
         r = run_scenario(self.vm, self.target, self.decide, sc,
                          max_steps=self.max_steps, trace_dir=self.trace_dir,
-                         verbose=False)
+                         verbose=False, a11y=self.a11y)
         return dspy.Prediction(score=r["score"], passed=r["passed"],
                                detail=r["detail"], result=r)
 
@@ -223,7 +223,7 @@ def main():
 
     results = []
     for sc in scenarios:
-        r = run_scenario(vm, target, decide, sc,
+        r = run_scenario(vm, target, decide, sc, a11y=opts["a11y"],
                          max_steps=opts["max_steps"], trace_dir=trace_dir)
         results.append(r)
         print(f"--> {sc.name}: {'PASS' if r['passed'] else 'FAIL'} "
@@ -238,7 +238,8 @@ def _run_dspy_evaluate(vm, target, decide, scenarios, opts, runtag):
     """Score the suite through dspy.Evaluate (single-threaded: one shared VM)."""
     devset = [dspy.Example(scenario_name=s.name).with_inputs("scenario_name")
               for s in scenarios]
-    program = ScenarioRunner(vm, target, decide, max_steps=opts["max_steps"])
+    program = ScenarioRunner(vm, target, decide, max_steps=opts["max_steps"],
+                             a11y=opts["a11y"])
     evaluate = dspy.Evaluate(devset=devset, metric=scenario_metric,
                              num_threads=1, display_progress=True,
                              return_outputs=True)
