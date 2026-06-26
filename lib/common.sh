@@ -80,7 +80,9 @@ bake_base() {
   rm -f "$base"
   qemu-img convert -O qcow2 -c "$disk" "$base"
   chmod 0444 "$base"
-  [[ -f "$vars" ]] && { cp "$vars" "$base_vars"; chmod 0444 "$base_vars"; }
+  # rm -f first: $base_vars from a previous bake is 0444, so a plain cp onto it
+  # fails with "Permission denied" (the disk above avoids this via its own rm -f).
+  [[ -f "$vars" ]] && { rm -f "$base_vars"; cp "$vars" "$base_vars"; chmod 0444 "$base_vars"; }
   echo ">> Base ready: $base ($(du -h "$base" | cut -f1), read-only)."
   echo "   Spawn instances with:  ./spawn.sh <win11|ubuntu> <name>"
 }
