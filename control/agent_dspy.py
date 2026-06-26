@@ -6,8 +6,14 @@ the OS guidance, the task, the history so far, and the *current screenshot*, the
 model picks ONE next action. We execute it, take a fresh screenshot, and loop —
 a clean "look -> act -> look" agent built from DSPy primitives.
 
+The reusable pieces live in two modules so the CLI, the optimizer, and the
+end-to-end benchmark all share them:
+  * policy.py  — the Signatures, action execution, LM + decider construction.
+  * runner.py  — the look->act loop (`run_agent`) returning a `RunResult`.
+This file is the thin command-line front end.
+
 DSPy talks to any provider through LiteLLM, so the model string is
-"<provider>/<model>" (e.g. "openai/gpt-4o", "anthropic/claude-opus-4-8").
+"<provider>/<model>" (e.g. "openai/gpt-5", "anthropic/claude-opus-4-8").
 
 Run (VM booted / spawned):
     # Ubuntu, pointed at a spawned instance
@@ -18,184 +24,19 @@ Run (VM booted / spawned):
 
 Provider via --provider or AGENT_PROVIDER; models via OPENAI_MODEL / ANTHROPIC_MODEL.
 """
-import json
 import os
 import sys
-import time
 
 import dspy
-import litellm
 
 from config import load_env
-from os_context import guidance
-from winvm import LinuxVM, WinVM
-
-# LiteLLM drops request params a given model doesn't accept (e.g. newer Anthropic
-# models reject `temperature`) instead of erroring.
-litellm.drop_params = True
-
-# ============================================================================
-# OS-specific configuration — the ONLY differences between Windows and Ubuntu:
-#   the VM class, the shell tool name, and the per-OS guide (os_context.guidance,
-#   sourced from control/guides/<os>.md).
-# ============================================================================
-VM_CLASS = {"win11": WinVM, "ubuntu": LinuxVM}
-RUN_TOOL = {"win11": "run_powershell", "ubuntu": "run_bash"}
-
-
-# ============================================================================
-# Shared (OS-agnostic) input handling
-# ============================================================================
-KEY_ALIASES = {
-    "enter": "ret", "return": "ret", "esc": "esc", "escape": "esc",
-    "space": "spc", "tab": "tab", "backspace": "backspace",
-    "del": "delete", "delete": "delete", "win": "meta_l", "super": "meta_l",
-    "cmd": "meta_l", "meta": "meta_l", "up": "up", "down": "down",
-    "left": "left", "right": "right", "ctrl": "ctrl", "control": "ctrl",
-    "alt": "alt", "shift": "shift", "home": "home", "end": "end",
-    "pgup": "pgup", "pgdn": "pgdn",
-}
-
-
-def to_qcodes(combo: str):
-    return [KEY_ALIASES.get(p.lower().strip(), p.lower().strip())
-            for p in combo.split("-")]
-
-
-SHOT = "/tmp/agent_shot.png"
-
-
-class NextAction(dspy.Signature):
-    """Drive a computer toward the task. Look at the screenshot and history,
-    then choose exactly ONE next action. Take a screenshot is automatic each
-    step, so just pick the action. Set done=true only when the task is fully
-    complete (then `note` is your final report)."""
-
-    guidance: str = dspy.InputField(desc="rules for operating this machine")
-    task: str = dspy.InputField(desc="the goal to accomplish")
-    history: str = dspy.InputField(desc="prior actions and their results")
-    screenshot: dspy.Image = dspy.InputField(desc="the current screen")
-
-    done: bool = dspy.OutputField(desc="true only if the task is fully complete")
-    tool: str = dspy.OutputField(
-        desc="left_click | double_click | type_text | key | run_powershell | run_bash")
-    args: str = dspy.OutputField(
-        desc='JSON args: {"x":N,"y":N} / {"text":"..."} / {"keys":"ctrl-l"} / {"script":"..."}')
-    note: str = dspy.OutputField(desc="one short sentence: what you're doing, or the final report")
-
-
-class NextActionA11y(dspy.Signature):
-    """Drive a computer toward the task. In addition to the screenshot you get an
-    accessibility tree: the on-screen elements with names and (sometimes) rects.
-    Prefer `click_element` (by name) over guessing pixel coordinates. BUT if
-    click_element reports it failed, or an element shows "no reliable position",
-    FALL BACK: use left_click on the screenshot, or run_bash / keyboard. Do not
-    repeat a failed click_element — switch methods. Choose exactly ONE next
-    action; set done=true only when the task is complete (then `note` is the
-    final report)."""
-
-    guidance: str = dspy.InputField(desc="rules for operating this machine")
-    task: str = dspy.InputField(desc="the goal to accomplish")
-    history: str = dspy.InputField(desc="prior actions and their results")
-    ui_tree: str = dspy.InputField(
-        desc='actionable UI elements, one per line: index: "name" [role] rect=[x,y,w,h]')
-    screenshot: dspy.Image = dspy.InputField(desc="the current screen")
-
-    done: bool = dspy.OutputField(desc="true only if the task is fully complete")
-    tool: str = dspy.OutputField(
-        desc="click_element | left_click | double_click | type_text | key | "
-             "run_bash | run_powershell")
-    args: str = dspy.OutputField(
-        desc='JSON: {"name":"Files"} (click_element) / {"text":".."} / {"keys":"ctrl-l"} '
-             '/ {"script":".."} / {"x":N,"y":N}')
-    note: str = dspy.OutputField(desc="one short sentence: what you're doing, or the final report")
-
-
-def _downscale(path, maxw):
-    """Shrink the screenshot to <= maxw px wide (fewer image tokens). Best-effort."""
-    try:
-        from PIL import Image
-        img = Image.open(path)
-        if img.width > maxw:
-            h = round(img.height * maxw / img.width)
-            img.resize((maxw, h)).save(path)
-    except Exception:  # noqa: BLE001
-        pass
-
-
-def fmt_tree(els):
-    if not els:
-        return "(accessibility tree empty or unavailable)"
-    lines = []
-    for i, e in enumerate(els):
-        pos = (f'rect={e["rect"]}' if e.get("clickable")
-               else "(no reliable position — try click_element by name, else use "
-                    "the screenshot with left_click)")
-        lines.append(f'{i}: "{e["name"]}" [{e["role"]}] {pos}')
-    return "\n".join(lines)
-
-
-def execute(vm, target, tool, args):
-    """Run one action against the VM; return a text observation."""
-    if tool in ("run_powershell", "run_bash"):
-        try:
-            if target == "win11":
-                return vm.powershell(args["script"]) or "(no output)"
-            rc, out, err = vm.run(args["script"])
-            return (out + err).strip() or "(no output)"
-        except Exception as e:  # noqa: BLE001 - surface to the model
-            return f"ERROR: {e}"
-    try:
-        if tool == "click_element":  # AT-SPI: click by element name (precise)
-            ok, how = vm.click_element(name=args.get("name"), index=args.get("index"))
-            vm.sleep(0.6)
-            if ok:
-                return f"clicked (via {how})"
-            if how == "bogus":
-                return ("could not click via accessibility (no usable action and a "
-                        "bogus position) — FALL BACK: take the screenshot and use "
-                        "left_click on the element, or use run_bash / keyboard")
-            return ("no such element in the accessibility tree — FALL BACK to the "
-                    "screenshot (left_click) or run_bash")
-        if tool == "left_click":
-            vm.click(int(args["x"]), int(args["y"]))
-        elif tool == "double_click":
-            vm.click(int(args["x"]), int(args["y"]), double=True)
-        elif tool == "type_text":
-            vm.type(args["text"])
-        elif tool == "key":
-            vm.key(*to_qcodes(args["keys"]))
-        else:
-            return f"unknown tool: {tool}"
-    except Exception as e:  # noqa: BLE001
-        return f"ERROR: {e}"
-    vm.sleep(0.6)
-    return "done (result visible in next screenshot)"
-
-
-def _is_reasoning(model: str) -> bool:
-    """GPT-5 family and o-series are reasoning models (different API rules)."""
-    return model.startswith(("gpt-5", "o1", "o3", "o4"))
-
-
-def make_lm(provider: str):
-    """Build the DSPy LM (LiteLLM model string). Keys read from env."""
-    if provider == "anthropic":
-        model = os.getenv("ANTHROPIC_MODEL", "claude-opus-4-8")
-        return dspy.LM(f"anthropic/{model}",
-                       api_key=os.getenv("ANTHROPIC_API_KEY"), max_tokens=4096)
-    model = os.getenv("OPENAI_MODEL", "gpt-4o")   # openai or OpenAI-compatible
-    kw = {"api_key": os.getenv("OPENAI_API_KEY"), "max_tokens": 4096}
-    if os.getenv("OPENAI_BASE_URL"):
-        kw["api_base"] = os.getenv("OPENAI_BASE_URL")
-    if _is_reasoning(model):
-        # Reasoning models: temperature must be 1.0, and the token budget must be
-        # large (reasoning tokens count toward it). reasoning_effort tunes depth
-        # vs. speed/cost (minimal | low | medium | high).
-        kw["temperature"] = 1.0
-        kw["max_tokens"] = max(16000, int(os.getenv("OPENAI_MAX_TOKENS", "16000")))
-        kw["reasoning_effort"] = os.getenv("OPENAI_REASONING_EFFORT", "low")
-    return dspy.LM(f"openai/{model}", **kw)
+# Re-exported for backward compatibility (optimize.py and others import these
+# from agent_dspy). The canonical home is now policy.py.
+from policy import (  # noqa: F401
+    KEY_ALIASES, NextAction, NextActionA11y, RUN_TOOL, SHOT, VM_CLASS,
+    build_decider, execute, fmt_tree, make_lm, to_qcodes,
+)
+from runner import print_usage, run_agent
 
 
 def main():
@@ -216,26 +57,14 @@ def main():
     task = argv[0] if argv else "Take a screenshot and describe what's on screen."
 
     dspy.configure(lm=make_lm(provider))
-    vm = VM_CLASS[target]()
-    w, h = vm._resolution()  # noqa: SLF001 - prime + report screen size
-    rules = guidance(target, w, h)
-
+    decide, label = build_decider(target, a11y=a11y)
     if a11y:
         kind = "UIA" if target == "win11" else "AT-SPI"
         print(f"[a11y] enabling accessibility tree in guest ({kind})...")
-        vm.ensure_a11y()
-        decide = dspy.Predict(NextActionA11y)
-    else:
-        # Use the DSPy-optimized policy if one has been compiled (optimize.py).
-        # Prefer a per-OS artifact (optimized_<target>.json); else a shared one.
-        decide = dspy.Predict(NextAction)
-        here = os.path.dirname(os.path.abspath(__file__))
-        for cand in (f"optimized_{target}.json", "optimized_agent.json"):
-            path = os.path.join(here, cand)
-            if os.path.exists(path):
-                decide.load(path)
-                print(f"[loaded optimized policy: {cand}]")
-                break
+    elif "compiled" in label:
+        print(f"[loaded optimized policy: {label.split(': ', 1)[-1]}]")
+
+    vm = VM_CLASS[target]()
 
     # Input trimming to cut per-step tokens/cost:
     #   AGENT_HISTORY_STEPS — keep only the last N actions in history (default 8)
@@ -245,70 +74,13 @@ def main():
     shot_maxw = int(os.getenv("AGENT_SHOT_MAXW", "0"))
 
     print(f"[dspy | {provider} | {target}{' | a11y' if a11y else ''}]  task: {task}\n")
-    history_lines = []
-    t_start = time.perf_counter()
-    t_llm = t_obs = 0.0           # cumulative: model time vs VM (screenshot/a11y/act) time
-    steps = 0
-    for step in range(40):
-        steps = step + 1
-        c0 = time.perf_counter()
-        vm.screenshot(SHOT)
-        if shot_maxw:
-            _downscale(SHOT, shot_maxw)
-        hist = "\n".join(history_lines[-hist_n:]) or "(none yet)"
-        kw = dict(guidance=rules, task=task, history=hist,
-                  screenshot=dspy.Image(SHOT))
-        if a11y:
-            kw["ui_tree"] = fmt_tree(vm.ui_tree())
-        c1 = time.perf_counter()
-        pred = decide(**kw)
-        c2 = time.perf_counter()
-        print(f"[{step}] {pred.tool} {pred.args}  (llm {c2 - c1:.1f}s) — {pred.note}")
-        t_llm += c2 - c1
-        t_obs += c1 - c0
-        if str(pred.done).lower() == "true":
-            break
-        try:
-            args = json.loads(pred.args or "{}")
-        except json.JSONDecodeError:
-            args = {}
-        a0 = time.perf_counter()
-        obs = execute(vm, target, pred.tool, args)
-        t_obs += time.perf_counter() - a0
-        history_lines.append(f"{step}. {pred.tool} {pred.args} -> {obs[:300]}")
-
-    total = time.perf_counter() - t_start
-    print(f"\n[timing] {steps} steps in {total:.1f}s "
-          f"(avg {total / steps:.1f}s/step) | model {t_llm:.1f}s | vm {t_obs:.1f}s")
-    _print_usage()
+    res = run_agent(vm, target, decide, task, a11y=a11y, max_steps=40,
+                    hist_n=hist_n, shot_maxw=shot_maxw)
+    print(f"\n[timing] {res.n_steps} steps in {res.wall_s:.1f}s "
+          f"(avg {res.wall_s / max(res.n_steps, 1):.1f}s/step) | "
+          f"model {res.llm_s:.1f}s | vm {res.vm_s:.1f}s")
+    print_usage(res.usage())
     vm.close()
-
-
-def _print_usage():
-    """Sum tokens + cost from the DSPy LM call history, if available."""
-    try:
-        hist = dspy.settings.lm.history
-    except Exception:  # noqa: BLE001
-        return
-    calls = len(hist)
-    cost = sum((h.get("cost") or 0) for h in hist)
-
-    def _usage(h):
-        u = h.get("usage") or {}
-        return u if isinstance(u, dict) else getattr(u, "__dict__", {})
-
-    def _reasoning(h):
-        d = _usage(h).get("completion_tokens_details")
-        if d is None:
-            return 0
-        return (d.get("reasoning_tokens", 0) if isinstance(d, dict)
-                else getattr(d, "reasoning_tokens", 0)) or 0
-    pin = sum(_usage(h).get("prompt_tokens", 0) or 0 for h in hist)
-    pout = sum(_usage(h).get("completion_tokens", 0) or 0 for h in hist)
-    rtok = sum(_reasoning(h) for h in hist)
-    rstr = f" ({rtok} reasoning)" if rtok else ""
-    cost_str = f" | est cost ${cost:.4f}" if cost else ""
-    print(f"[tokens] {calls} LLM calls, {pin} in + {pout} out{rstr}{cost_str}")
 
 
 if __name__ == "__main__":
