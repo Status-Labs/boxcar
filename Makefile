@@ -27,6 +27,8 @@ PROVIDER ?=
 SCENARIO ?=
 # SAMPLES: run each scenario N times for a pass-RATE (blank/1 = single run).
 SAMPLES  ?=
+# NAMES: comma list of clone names for `eval-parallel` (blank = all running clones).
+NAMES    ?=
 # TASK: one-off task for `make agent`.  EVAL_ARGS/OPT_ARGS: extra flag passthrough.
 TASK     ?=
 PY       ?= control/.venv/bin/python
@@ -42,13 +44,14 @@ SOCK     := $(CLONES)/$(N)-qmp.sock
 PROVIDER_ARG := $(if $(strip $(PROVIDER)),--provider $(strip $(PROVIDER)),)
 SCEN_ARG     := $(if $(strip $(SCENARIO)),--scenario $(strip $(SCENARIO)),)
 SAMPLES_ARG  := $(if $(strip $(SAMPLES)),--samples $(strip $(SAMPLES)),)
+NAMES_ARG    := $(if $(strip $(NAMES)),--names $(strip $(NAMES)),)
 # Read the forwarded SSH port back out of the running qemu cmdline for this clone.
 PORT_CMD = ps -ww -o args= -C qemu-system-x86_64 2>/dev/null \
   | grep -F -- "-name $(FULLNAME)" \
   | grep -oE 'hostfwd=tcp:127.0.0.1:[0-9]+' | grep -oE '[0-9]+$$' | head -1
 
-.PHONY: help venv lint test spawn up down reset recreate ps eval agent bootstrap \
-        optimize clean install bake
+.PHONY: help venv lint test spawn up down reset recreate ps eval eval-parallel \
+        agent bootstrap optimize clean install bake
 
 help: ## Show this help
 	@echo "Boxcar make targets (vars: TARGET=$(T) NAME=$(N)):"
@@ -133,6 +136,10 @@ eval: ## Run the scenario suite (SCENARIO=subset; SAMPLES=5 for pass-rate; EVAL_
 	  echo ">> $(FULLNAME)  ssh:$$port  qmp:$(SOCK)"; \
 	  VM_SSH_PORT=$$port VM_QMP_SOCK=$(SOCK) \
 	    $(PY) control/evals.py --target $(T) $(PROVIDER_ARG) $(SCEN_ARG) $(SAMPLES_ARG) $(EVAL_ARGS)
+
+eval-parallel: ## Shard the suite across running clones (NAMES=a,b,c or all; SAMPLES=K)
+		@$(PY) control/eval_parallel.py --target $(T) $(NAMES_ARG) $(PROVIDER_ARG) \
+		  $(SCEN_ARG) $(SAMPLES_ARG) $(EVAL_ARGS)
 
 agent: ## Drive a one-off task (TASK="...") against the clone
 	@port=$$($(PORT_CMD)); \

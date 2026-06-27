@@ -127,6 +127,55 @@ def test_signup_partial_scores_below_one():
         ctx.stop()
 
 
+def _eval_parallel():
+    """Import control/eval_parallel (needs control/ on sys.path); skip if absent."""
+    import os
+    control = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                           "control")
+    if control not in sys.path:
+        sys.path.insert(0, control)
+    import eval_parallel
+    return eval_parallel
+
+
+def test_parallel_split_round_robin():
+    ep = _eval_parallel()
+    assert ep.split_round_robin([1, 2, 3, 4, 5], 2) == [[1, 3, 5], [2, 4]]
+    assert ep.split_round_robin([1, 2, 3], 3) == [[1], [2], [3]]
+    # More buckets than items: trailing empties are dropped, not returned blank.
+    assert ep.split_round_robin([1], 4) == [[1]]
+    print("  ok  parallel  split_round_robin deals evenly + drops empty buckets")
+
+
+def test_parallel_parse_clones():
+    ep = _eval_parallel()
+    ps = (
+        "qemu-system-x86_64 -name ubuntu-a -smp 4 -netdev "
+        "user,id=net0,hostfwd=tcp:127.0.0.1:2223-:22 -qmp unix:x\n"
+        "qemu-system-x86_64 -name ubuntu-bee -netdev "
+        "user,id=net0,hostfwd=tcp:127.0.0.1:2224-:22\n"
+        "qemu-system-x86_64 -name win11-c -netdev "
+        "user,id=net0,hostfwd=tcp:127.0.0.1:2299-:22\n"        # other target: ignored
+        "some-other-process --name ubuntu-zzz\n"               # not qemu/no port: ignored
+    )
+    clones = ep.parse_clones(ps, "ubuntu")
+    assert set(clones) == {"a", "bee"}, clones
+    assert clones["a"][0] == 2223 and clones["bee"][0] == 2224
+    assert clones["a"][1].endswith("vms/ubuntu/clones/a-qmp.sock"), clones["a"][1]
+    print("  ok  parallel  parse_clones reads name/port per target, skips others")
+
+
+def test_parallel_merge_results():
+    ep = _eval_parallel()
+    shard_a = [{"scenario": "webmail"}, {"scenario": "triage"}]
+    shard_b = [{"scenario": "signup"}]
+    merged = ep.merge_results([shard_a, shard_b],
+                              ["webmail", "signup", "triage", "expense"])
+    # Reordered to scenario_order; a scenario no shard reported (expense) is absent.
+    assert [r["scenario"] for r in merged] == ["webmail", "signup", "triage"]
+    print("  ok  parallel  merge_results restores order + omits unreported")
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     print(f"running {len(tests)} host-only scenario tests...")

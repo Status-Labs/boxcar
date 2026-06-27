@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Parallel eval sharding** (`control/eval_parallel.py`, `make eval-parallel`).
+  Fans the scenario suite out over several already-spawned disposable clones —
+  making k-sampling affordable. It discovers running clones from the live qemu
+  cmdlines, splits scenarios round-robin across them, runs one `evals.py` worker
+  subprocess per clone (each pinned to that clone's SSH port + QMP socket), and
+  merges the per-clone JSON reports into one combined scorecard + report. Whole
+  scenarios per clone (balances best when #scenarios ≥ #clones); a dead worker is
+  reported as a FAIL for its scenarios rather than sinking the run. Subprocess
+  isolation means no cross-clone shared state — only the split/merge logic is new,
+  and it's unit-tested host-side. `NAMES=a,b,c` picks specific clones.
 - **k-sample pass-rate evals** (`control/evals.py --samples K`, or
   `make eval SAMPLES=K`). Vision clicks are non-deterministic run to run, so a
   single pass/fail is noisy. Each scenario now runs K times and the scorecard
