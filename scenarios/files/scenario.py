@@ -29,6 +29,10 @@ def _dir(vm):
 
 
 def setup(ctx: ScenarioContext, vm):
+    # Close any open Files window so the run starts from a clean Home view — a
+    # stale Nautilus window left over from a prior run/sample shows the old
+    # (now recreated) folder and makes navigation non-deterministic.
+    vm.run(f"pkill -u {vm.username} nautilus 2>/dev/null; true")
     # Rebuild the tree from scratch so a re-run can't pass on a stale state and
     # `obsolete.txt` is freshly present (so the pre-check fails as it should).
     base = f"/home/{vm.username}/{ROOT}"
@@ -42,10 +46,9 @@ def setup(ctx: ScenarioContext, vm):
 def task(ctx: ScenarioContext) -> str:
     return (
         "Open the Files app (GNOME Files / Nautilus). Starting from your Home "
-        f"folder, double-click the `{ROOT}` folder to open it, then double-click "
-        f"the `{SUB}` folder inside it. In `{SUB}`, move the file `{TARGET}` to "
-        "the Trash: click it once to select it, then press the Delete key. Leave "
-        f"`{KEEP}` untouched.")
+        f"folder, open the `{ROOT}` folder, then open the `{SUB}` folder inside "
+        f"it. In `{SUB}`, move the file `{TARGET}` to the Trash (select it and "
+        f"press the Delete key). Leave `{KEEP}` untouched.")
 
 
 def check(ctx: ScenarioContext, vm) -> CheckResult:
