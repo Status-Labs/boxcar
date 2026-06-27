@@ -67,11 +67,26 @@ Home is `/home/user`; the Desktop is `~/Desktop`.
   the query or URL, enter; then screenshot to read the page.
 - **Read text off the screen**: take a screenshot and read it visually; for file
   contents prefer `run_bash` (`cat <file>`).
-- **Navigate Files (Nautilus) to a folder**: don't click folder icons (GTK4
-  exposes them poorly). Either `run_bash` `nautilus <path>` (e.g.
-  `nautilus ~/Documents`), or in the window press `ctrl-l` and type the path.
+- **Navigate Files (Nautilus) to a folder**: **double-click a folder** to open
+  it — folder and file cells are grounded, so click them directly. To descend
+  several levels, double-click each folder in turn. If you already know the exact
+  full path, `ctrl-l` + type the path (or `run_bash` `nautilus <path>`) is also
+  reliable — but don't type a path you'd have to guess; just click the folder you
+  can see.
+- **Act on a file in Files**: click a file **once** to select it (the cell
+  highlights). To move the selected file to the Trash, press **Delete** (no
+  confirmation; it just leaves the folder). To rename, press **F2**. Avoid
+  Shift+Delete unless you mean to permanently erase it.
 - **Save a GUI file to an exact path** (GTK Save dialog): typing a full path into
-  the "Name" field does NOT change folder. Instead, with the Save dialog open
-  press **ctrl-l** to get a location entry, type the **full path**
-  (e.g. `/home/user/Desktop/poem.txt`), press **enter**, then click **Save**.
+  the "Name" field does NOT change folder. Follow this exact recipe once the Save
+  dialog is open — do it once, in order, then stop and screenshot:
+  1. Press **ctrl-l** **once** — a location entry appears (or the Name field
+     becomes a path entry). Do NOT press ctrl-l again; if you can already type a
+     path, skip straight to step 2.
+  2. Type the **full path** (e.g. `/home/user/Desktop/poem.txt`).
+  3. Press **enter**. In GNOME Text Editor that enter usually saves directly; if a
+     **Save** button is still showing, click it **once**.
+  4. **Never click Cancel** — Cancel throws away the save and the dialog. If
+     something looks wrong, screenshot and re-read the dialog rather than
+     cancelling or re-opening it.
   Confirm the file with `run_bash` (`cat <path>`).
