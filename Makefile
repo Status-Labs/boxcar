@@ -25,6 +25,8 @@ NAME     ?= eval
 # PROVIDER: anthropic|openai (blank = .env default).  SCENARIO: comma list (blank = all).
 PROVIDER ?=
 SCENARIO ?=
+# SAMPLES: run each scenario N times for a pass-RATE (blank/1 = single run).
+SAMPLES  ?=
 # TASK: one-off task for `make agent`.  EVAL_ARGS/OPT_ARGS: extra flag passthrough.
 TASK     ?=
 PY       ?= control/.venv/bin/python
@@ -39,6 +41,7 @@ CLONES   := vms/$(T)/clones
 SOCK     := $(CLONES)/$(N)-qmp.sock
 PROVIDER_ARG := $(if $(strip $(PROVIDER)),--provider $(strip $(PROVIDER)),)
 SCEN_ARG     := $(if $(strip $(SCENARIO)),--scenario $(strip $(SCENARIO)),)
+SAMPLES_ARG  := $(if $(strip $(SAMPLES)),--samples $(strip $(SAMPLES)),)
 # Read the forwarded SSH port back out of the running qemu cmdline for this clone.
 PORT_CMD = ps -ww -o args= -C qemu-system-x86_64 2>/dev/null \
   | grep -F -- "-name $(FULLNAME)" \
@@ -124,12 +127,12 @@ ps: ## List running clones for this target
 # ============================================================================ #
 # Run against a clone (port/sock derived automatically)
 # ============================================================================ #
-eval: ## Run the scenario suite (SCENARIO=name,name for a subset; EVAL_ARGS=--trace)
+eval: ## Run the scenario suite (SCENARIO=subset; SAMPLES=5 for pass-rate; EVAL_ARGS=--trace)
 	@port=$$($(PORT_CMD)); \
 	  [ -n "$$port" ] || { echo "✗ no running $(FULLNAME) — 'make up NAME=$(N)'"; exit 1; }; \
 	  echo ">> $(FULLNAME)  ssh:$$port  qmp:$(SOCK)"; \
 	  VM_SSH_PORT=$$port VM_QMP_SOCK=$(SOCK) \
-	    $(PY) control/evals.py --target $(T) $(PROVIDER_ARG) $(SCEN_ARG) $(EVAL_ARGS)
+	    $(PY) control/evals.py --target $(T) $(PROVIDER_ARG) $(SCEN_ARG) $(SAMPLES_ARG) $(EVAL_ARGS)
 
 agent: ## Drive a one-off task (TASK="...") against the clone
 	@port=$$($(PORT_CMD)); \

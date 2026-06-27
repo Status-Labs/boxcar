@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **k-sample pass-rate evals** (`control/evals.py --samples K`, or
+  `make eval SAMPLES=K`). Vision clicks are non-deterministic run to run, so a
+  single pass/fail is noisy. Each scenario now runs K times and the scorecard
+  switches to a pass-rate view — `pass@K`, score mean ± sd, and a `FLAKY` flag for
+  scenarios that neither always pass nor always fail. The JSON report keeps the K
+  raw per-run records under `runs[]` plus top-level `mean_pass_rate`/`n_flaky`.
+  `--samples 1` (default) leaves the original single-run scorecard byte-for-byte
+  unchanged. Sampling is sequential on one VM for now (clone-sharding is a planned
+  speedup).
 - **`files` scenario — click-bound Files navigation.** A desktop task that opens
   GNOME Files, descends two folders by double-clicking (`~/Workspace` → `inbox`),
   and moves `obsolete.txt` to the Trash while leaving `keep.txt` intact (verified
