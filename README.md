@@ -61,6 +61,7 @@ Each VM is a single script. Disks, UEFI vars, and TPM state live in `vms/`.
 | `scenarios/expense/`| Read a budget table → compute the overage → file a report |
 | `scenarios/editor/`| Desktop app: Text Editor → type content → Save As to a path |
 | `scenarios/settings/`| Desktop app: Settings → Appearance → Dark (verified via `gsettings`) |
+| `scenarios/files/`| Desktop app: Files → click into `Workspace`/`inbox` → move a file to Trash |
 | `control/backends.py`| LLM provider adapters (Anthropic / OpenAI / compat) |
 | `isos/`           | Installer ISOs (git-ignored)                         |
 | `vms/<type>/`     | Per-VM state: `disk.qcow2`, `vars.fd`, `tpm/`, `base.qcow2`, `clones/` |

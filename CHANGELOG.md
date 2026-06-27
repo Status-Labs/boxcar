@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`files` scenario — click-bound Files navigation.** A desktop task that opens
+  GNOME Files, descends two folders by double-clicking (`~/Workspace` → `inbox`),
+  and moves `obsolete.txt` to the Trash while leaving `keep.txt` intact (verified
+  over SSH). Unlike the keyboard-heavy `editor`, the GUI path requires landing
+  clicks on folder/file **grid cells**, so it cleanly showcases the GTK4 rect
+  recovery (PR #2). Tagged `desktop, hard`.
 - **Scenario benchmark suite + end-to-end evals.** A `Scenario` framework
   (`scenarios/framework.py`, `registry.py`) turns each task into a scored
   benchmark with a verifiable end-state check. New complex workflows: a
@@ -62,6 +68,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `provision.sh` policy now sets `PasswordManagerEnabled: false`.
   - The guide's form-filling section now teaches type-after-one-click, Tab
     between fields, and a GTK `Ctrl+L` Save-As recipe (fixed the editor scenario).
+- **Save-As / Files guidance hardened against flailing.** The GTK Save-As recipe
+  in `control/guides/ubuntu.md` is now a strict numbered sequence (Ctrl+L once →
+  full path → Enter → click Save) with explicit "press Ctrl+L only once" and
+  "never click Cancel" rules — the two failure modes seen in `editor` traces. The
+  Nautilus section was also updated: now that folder/file cells are grounded (the
+  GTK4 rect recovery, PR #2), it teaches **double-click to open a folder** and
+  click-to-select + Delete-to-Trash, instead of the old "don't click folder
+  icons" workaround.
   - `signup` made agent-friendly per the project's "one unambiguous target"
     principle: autofocus the first field of each wizard step, a large clickable
     terms row instead of a bare checkbox, and a 60-step budget for the longest flow.
