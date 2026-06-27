@@ -77,7 +77,32 @@ triage       FAIL     0.60    40      210s     90000     $0.3000   right ticket 
 ```
 
 Flags: `--provider`, `--target`, `--scenario a,b`, `--tag t`, `--no-optimized`,
-`--a11y`, `--max-steps N`, `--trace` (save per-step screenshots), `--dspy-evaluate`.
+`--a11y`, `--max-steps N`, `--samples K`, `--trace` (save per-step screenshots),
+`--dspy-evaluate`.
+
+## k-sample pass-rate
+
+Vision clicks are **non-deterministic** run to run — a scenario can pass once and
+fail the next time, so a single pass/fail is noisy. `--samples K` (or
+`make eval SAMPLES=K`) runs each scenario K times and reports a **pass-rate**
+instead: `pass@K`, the score mean ± standard deviation, and a `FLAKY` flag for any
+scenario that neither always passes nor always fails. The JSON report keeps the K
+raw per-run records under each scenario's `runs[]`, plus `mean_pass_rate` and
+`n_flaky` at the top level.
+
+```
+scenario     pass@5   score(mean±sd)   steps   flake   cost       detail
+----------------------------------------------------------------------------------------
+webmail      5/5      1.00±0.00        12      -       $0.6000    all 5 passed
+invoices     3/5      0.60±0.49        31      FLAKY   $1.5000    FLAKY 3/5 passed; scores 1.0,...
+triage       0/5      0.00±0.00        40      -       $1.5000    right ticket but priority=''
+----------------------------------------------------------------------------------------
+mean pass-rate 53% | mean score 0.53 | 1 flaky | total cost $3.6000
+```
+
+`--samples 1` (the default) keeps the original single-run scorecard unchanged.
+Sampling is currently sequential on one VM; sharding the K×N runs across parallel
+disposable clones (`make up` several, split the work) is the next speedup.
 
 ## The suite as a DSPy eval
 
