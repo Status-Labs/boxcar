@@ -20,9 +20,9 @@ work in.
   endpoint; Windows (PowerShell/SSH) and Ubuntu (bash) targets.
 - ⚡ **Golden images** — bake once, spawn disposable CoW clones in milliseconds.
 - 🧠 **DSPy variant** — an optimizable policy you can compile per-OS.
-- 📊 **Scored benchmark suite** — 8 real tasks with verifiable end-states, an
-  end-to-end eval runner (scorecard + JSON report), and a rollout-bootstrapping
-  optimizer. See [docs/evals.md](docs/evals.md).
+- 📊 **Scored benchmark suite** — 9 real tasks with verifiable end-states, an
+  end-to-end eval runner (scorecard + JSON report, `--samples K` for pass-rate),
+  and a rollout-bootstrapping optimizer. See [docs/evals.md](docs/evals.md).
 - ♿ **Accessibility trees** — opt-in AT-SPI / UI Automation grounding (`--a11y`).
 - 🎬 **Ready-made scenarios** — webmail, downloads, invoices, a multi-page sign-up
   wizard, issue triage, expense reporting, and desktop-app tasks.
