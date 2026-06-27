@@ -47,6 +47,7 @@ setting. Partial scores separate reasoning failures from grounding failures.
 | `expense`  | web, reason, math   | read a budget table → compute the over-budget overage → fill + submit |
 | `editor`   | desktop, hard       | open the Text Editor → type exact content → Save As to a path |
 | `settings` | desktop             | open Settings → Appearance → switch to Dark (verified via `gsettings`) |
+| `files`    | desktop, hard       | open Files → click into `Workspace`/`inbox` → move a file to Trash (clicks folder/file grid cells) |
 
 ## Running the eval
 
