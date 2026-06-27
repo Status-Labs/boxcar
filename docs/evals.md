@@ -11,6 +11,7 @@ scenarios/registry.py    discovers every scenario; select() by name/target/tag
 control/policy.py        the DSPy Signatures, action execution, LM + decider build
 control/runner.py        the look->act loop (run_agent) returning a RunResult + trace
 control/evals.py         drive the suite on a VM, score it, write a scorecard/report
+control/eval_parallel.py shard the suite across several clones (one worker each)
 control/optimize.py      compile-time optimizer over labeled first-actions (proxy)
 control/bootstrap_rollouts.py   harvest demos from PASSING runs -> back into optimize
 ```
@@ -101,8 +102,32 @@ mean pass-rate 53% | mean score 0.53 | 1 flaky | total cost $3.6000
 ```
 
 `--samples 1` (the default) keeps the original single-run scorecard unchanged.
-Sampling is currently sequential on one VM; sharding the K×N runs across parallel
-disposable clones (`make up` several, split the work) is the next speedup.
+
+### Parallel: shard across clones
+
+K-sampling multiplies wall-time, so `control/eval_parallel.py` fans the suite out
+over several **disposable clones** you've already spawned. Spawn a few, log each
+into the desktop, then:
+
+```bash
+make up NAME=a; make up NAME=b; make up NAME=c   # (log each into the desktop)
+make eval-parallel SAMPLES=5                       # all running clones
+make eval-parallel NAMES=a,b,c SAMPLES=5           # specific clones
+control/.venv/bin/python control/eval_parallel.py --target ubuntu --samples 5
+```
+
+It discovers running clones from the live qemu cmdlines (name + forwarded SSH
+port), splits the scenarios round-robin across them, runs one `evals.py` **worker
+subprocess** per clone (each pinned to that clone's port + QMP socket), then
+merges the per-clone JSON reports into one combined scorecard + report. Each
+worker is the ordinary single-VM path with its own VM and dspy/LM state, so there
+is no cross-clone shared state — only the split and merge, which are pure and
+unit-tested. Whole scenarios are assigned per clone, so this balances best when
+**#scenarios ≥ #clones** (with more clones than scenarios, the extras idle). A
+worker that dies is reported as a FAIL for its scenarios rather than sinking the
+run. It accepts the shared flags (`--provider`, `--a11y`, `--no-optimized`,
+`--max-steps`, `--tag`, `--scenario`); `--trace`/`--dspy-evaluate` are
+single-VM-only.
 
 ## The suite as a DSPy eval
 

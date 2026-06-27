@@ -256,6 +256,7 @@ def _parse_argv(argv):
         "scenarios": None, "tags": None, "optimized": True, "a11y": False,
         "max_steps": None, "dspy_evaluate": False, "trace": False,
         "samples": int(os.getenv("AGENT_SAMPLES", "1")),
+        "report_path": None,
     }
     while argv:
         a = argv.pop(0)
@@ -275,6 +276,8 @@ def _parse_argv(argv):
             opts["max_steps"] = int(argv.pop(0))
         elif a == "--samples":
             opts["samples"] = int(argv.pop(0))
+        elif a == "--report-path":
+            opts["report_path"] = argv.pop(0)
         elif a == "--dspy-evaluate":
             opts["dspy_evaluate"] = True
         elif a == "--trace":
@@ -353,8 +356,8 @@ def _run_dspy_evaluate(vm, target, decide, scenarios, opts, runtag):
 
 
 def _write_report(results, opts, label, runtag):
-    os.makedirs(REPORTS, exist_ok=True)
-    path = os.path.join(REPORTS, f"eval-{runtag}.json")
+    path = opts.get("report_path") or os.path.join(REPORTS, f"eval-{runtag}.json")
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     results = [{k: v for k, v in r.items() if not k.startswith("_")} for r in results]
     samples = opts.get("samples", 1)
     payload = {
