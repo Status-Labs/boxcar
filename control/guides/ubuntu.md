@@ -67,16 +67,19 @@ Home is `/home/user`; the Desktop is `~/Desktop`.
   the query or URL, enter; then screenshot to read the page.
 - **Read text off the screen**: take a screenshot and read it visually; for file
   contents prefer `run_bash` (`cat <file>`).
-- **Navigate Files (Nautilus) to a folder**: **double-click a folder** to open
-  it — folder and file cells are grounded, so click them directly. To descend
-  several levels, double-click each folder in turn. If you already know the exact
-  full path, `ctrl-l` + type the path (or `run_bash` `nautilus <path>`) is also
-  reliable — but don't type a path you'd have to guess; just click the folder you
-  can see.
-- **Act on a file in Files**: click a file **once** to select it (the cell
-  highlights). To move the selected file to the Trash, press **Delete** (no
-  confirmation; it just leaves the folder). To rename, press **F2**. Avoid
-  Shift+Delete unless you mean to permanently erase it.
+- **Open a folder in Files (Nautilus)**: do NOT guess pixel coordinates for the
+  icon — grid cells are small and easy to miss. Folder/file cells are in the
+  accessibility tree by name, so **`click_element` by the folder's name to select
+  it, then press `enter` to open it**. To descend `Workspace` → `inbox`:
+  `click_element {"name":"Workspace"}`, `key {"keys":"enter"}`,
+  `click_element {"name":"inbox"}`, `key {"keys":"enter"}`. (A single click only
+  *selects* the folder; **enter** is what opens it — don't coordinate-double-click.)
+  If you already know the exact full path, `ctrl-l` + type the path (or `run_bash`
+  `nautilus <path>`) also works — but don't type a path you'd have to guess.
+- **Act on a file in Files**: **`click_element` by the file's name** to select it
+  (don't guess pixels), then act on the selection by keyboard: **Delete** moves it
+  to the Trash (no confirmation; it just leaves the folder), **F2** renames,
+  **enter** opens it. Avoid Shift+Delete unless you mean to permanently erase it.
 - **Save a GUI file to an exact path** (GTK Save dialog): typing a full path into
   the "Name" field does NOT change folder. Follow this exact recipe once the Save
   dialog is open — do it once, in order, then stop and screenshot:
