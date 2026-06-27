@@ -266,8 +266,8 @@ class WinVM(VM):
     def click_element(self, name=None, role=None, index=None, double=False):
         """Click a UI element by name or index using its UIA rect (reliable on
         Windows). Returns (ok: bool, how: str) — "rect" / "bogus" / "notfound"."""
-        els = self.ui_tree()
-        target = None
+        els = self.ui_tree(limit=400)  # exhaustive: resolve the rect even for
+        target = None                  # deep cells the model-facing tree may cap
         if index is not None and 0 <= index < len(els):
             target = els[index]
         elif name:
@@ -339,11 +339,16 @@ class LinuxVM(VM):
                     and not (r[0] == 0 and r[1] == 0)
                     and 0 <= r[0] < 6000 and 0 <= r[1] < 4000)
 
-    def ui_tree(self, limit: int = 80):
+    def ui_tree(self, limit: int = 150):
         """Return visible, actionable UI elements from the guest's AT-SPI tree as
         [{"name","role","rect":[x,y,w,h] or None,"clickable":bool}]. `clickable`
         is False when the rect is bogus (GTK4 apps) — the caller should then act
-        by AT-SPI action, vision, or shell instead of clicking the rect."""
+        by AT-SPI action, vision, or shell instead of clicking the rect.
+
+        Default limit is generous because file managers / icon grids put their
+        cells deep in the tree (after the dock + window chrome); an 80-element cap
+        truncated Nautilus folder/file cells, so the model never saw them and
+        click_element could not resolve their rects."""
         rc, out, _ = self.run(
             self._session_env() + f"python3 {self._A11Y_REMOTE} {limit}", timeout=60)
         line = (out.strip().splitlines() or [""])[-1]
@@ -360,13 +365,32 @@ class LinuxVM(VM):
     def click_element(self, name=None, role=None, index=None, double=False):
         """Activate a UI element by name (preferred) or index, with a fallback
         chain. Returns (ok: bool, how: str) where how is:
-          "action" — fired the element's AT-SPI action (coordinate-free, best)
-          "rect"   — clicked its valid on-screen rect
-          "bogus"  — found, but no action and a bogus rect (caller should fall
-                     back to vision/screenshot or shell)
+          "rect"   — clicked its valid on-screen rect (a real click, so the widget
+                     also gets keyboard focus — needed before keys like Enter/Delete)
+          "action" — fired the element's AT-SPI action (coordinate-free fallback)
+          "bogus"  — found, but no usable rect and the action failed (caller should
+                     fall back to vision/screenshot or shell)
           "notfound" — no matching element in the tree
+
+        Rect-first: now that bogus GTK4 rects are recovered (atspi_helper), a real
+        click is preferable to the AT-SPI action — the action *selects* a grid cell
+        in-model without giving the view keyboard focus, so a following Delete/Enter
+        would miss. Fall back to the action only when the rect is bogus/unavailable.
         """
         import shlex
+        els = self.ui_tree(limit=400)  # exhaustive: resolve the rect even for
+        target = None                  # deep cells the model-facing tree may cap
+        if index is not None and 0 <= index < len(els):
+            target = els[index]
+        elif name:
+            target = next((e for e in els
+                           if name.lower() in (e["name"] or "").lower()
+                           and (role is None or role == e["role"])), None)
+        if target is not None and target.get("clickable"):
+            x, y, w, h = target["rect"]
+            self.click(int(x + w / 2), int(y + h / 2), double=double)
+            return True, "rect"
+        # Rect missing or bogus: fall back to the coordinate-free AT-SPI action.
         if name:
             rc, out, _ = self.run(
                 self._session_env()
@@ -377,21 +401,7 @@ class LinuxVM(VM):
                     return True, "action"
             except json.JSONDecodeError:
                 pass
-        els = self.ui_tree()
-        target = None
-        if index is not None and 0 <= index < len(els):
-            target = els[index]
-        elif name:
-            target = next((e for e in els
-                           if name.lower() in (e["name"] or "").lower()
-                           and (role is None or role == e["role"])), None)
-        if target is None:
-            return False, "notfound"
-        if not target.get("clickable"):
-            return False, "bogus"
-        x, y, w, h = target["rect"]
-        self.click(int(x + w / 2), int(y + h / 2), double=double)
-        return True, "rect"
+        return (False, "notfound") if target is None else (False, "bogus")
 
 
 # --- character -> (modifiers, qcode) map for type() --------------------------

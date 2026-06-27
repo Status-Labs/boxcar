@@ -57,6 +57,17 @@ cat > /etc/gdm3/custom.conf <<'EOF'
 WaylandEnable=false
 EOF
 
+echo "=== suppress the first-login 'Welcome to Ubuntu' wizard ==="
+# Each fresh clone logs in for the first time, so gnome-initial-setup pops a
+# full-window wizard that overlays the desktop and blocks GUI scenarios. Mark it
+# done for `user` and hide its autostart so it never appears. (Re-bake to apply.)
+install -d -o user -g user /home/user/.config
+printf 'yes\n' > /home/user/.config/gnome-initial-setup-done
+chown user:user /home/user/.config/gnome-initial-setup-done
+if [ -f /etc/xdg/autostart/gnome-initial-setup-first-login.desktop ]; then
+  echo 'Hidden=true' >> /etc/xdg/autostart/gnome-initial-setup-first-login.desktop
+fi
+
 echo "=== disable screen lock / blanking ==="
 install -d /etc/dconf/profile /etc/dconf/db/local.d
 printf 'user-db:user\nsystem-db:local\n' > /etc/dconf/profile/user
