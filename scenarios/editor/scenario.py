@@ -20,6 +20,14 @@ def _path(vm):
 
 
 def setup(ctx: ScenarioContext, vm):
+    # Close any Text Editor / Save dialog left open by a prior run/sample, so each
+    # run starts from an empty editor. A leftover window (stale text, an open Save
+    # dialog) makes the run non-deterministic and lets the agent skip straight to
+    # saving — or assume the task is already done and no-op.
+    # NB: -f (match full cmdline) is required — the process comm is truncated to
+    # 15 chars ("gnome-text-edit"), so a plain `pkill gnome-text-editor` matches
+    # nothing.
+    vm.run(f"pkill -u {vm.username} -f gnome-text-editor 2>/dev/null; true")
     # Clean any leftover from a previous run so the check can't pass stale.
     vm.run(f"rm -f {_path(vm)}")
 

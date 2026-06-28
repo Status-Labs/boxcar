@@ -22,6 +22,13 @@ def _session(vm):
 
 
 def setup(ctx: ScenarioContext, vm):
+    # Close any Settings window left open by a prior run/sample so each run starts
+    # clean — a stale window (e.g. already on Appearance) makes the run
+    # non-deterministic and lets the agent assume the task is already done.
+    # NB: -f (match full cmdline) is required — the process comm is truncated to
+    # 15 chars ("gnome-control-c"), so a plain `pkill gnome-control-center` matches
+    # nothing.
+    vm.run(f"pkill -u {vm.username} -f gnome-control-center 2>/dev/null; true")
     vm.run(_session(vm) + f"gsettings set {KEY} default")
 
 
