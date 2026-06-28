@@ -89,6 +89,7 @@ def run_agent(vm, target, decide, task, *, a11y=False, max_steps=40,
     res = RunResult(task=task, target=target, usage_since=_lm_history_len())
     history_lines: list[str] = []
     prev_sig, repeats, clicks_no_type = None, 0, 0
+    awaiting_confirm = False  # require two consecutive `done` claims to finish
     t_start = time.perf_counter()
     for i in range(max_steps):
         c0 = time.perf_counter()
@@ -118,11 +119,29 @@ def run_agent(vm, target, decide, task, *, a11y=False, max_steps=40,
         if verbose:
             print(f"[{i}] {step.tool} {step.args}  (llm {step.llm_s:.1f}s) — {step.note}")
         if done:
-            step.obs = "(done)"
+            # Premature-`done` is a common failure: the model claims completion
+            # early (sometimes at step 0 with a no-op like `run_bash ":"`) on an
+            # assumption or a stale/misread screen. Don't finish on the first
+            # claim — force one fresh look + an explicit re-check, and only accept
+            # when the model confirms `done` twice in a row.
+            if awaiting_confirm:
+                step.obs = "(done, confirmed)"
+                res.steps.append(step)
+                res.done = True
+                res.final_note = step.note
+                break
+            awaiting_confirm = True
+            step.obs = "(you reported the task complete — verify before finishing)"
             res.steps.append(step)
-            res.done = True
-            res.final_note = step.note
-            break
+            history_lines.append(
+                f"{i}. You reported the task COMPLETE — do NOT finish on an "
+                "assumption. Look at the CURRENT screen and re-check every "
+                "requirement of the task (file actually saved? setting actually "
+                "changed? exact text present where it should be?). If it is truly "
+                "done, report done once more. If anything is missing or you only "
+                "intended to act, do the next concrete action now.")
+            continue
+        awaiting_confirm = False  # a real action resets the confirm gate
         # Stall detection, two signals:
         #  (1) the same (tool,args) chosen repeatedly — a hard no-op loop;
         #  (2) consecutive coordinate-clicks with no typing in between — the
