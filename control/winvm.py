@@ -105,7 +105,10 @@ class VM:
     def screenshot(self, path: str | None = None):
         """Capture the screen to a PNG. Returns the file path (or a PIL.Image
         if Pillow is installed and no path is given)."""
-        out = os.path.abspath(path) if path else os.path.join(_HERE, ".last.png")
+        # Default paths are per-process: concurrent eval workers must not share
+        # screenshot files (see policy.SHOT).
+        out = (os.path.abspath(path) if path
+               else os.path.join(_HERE, f".last-{os.getpid()}.png"))
         self._cmd({"execute": "screendump",
                    "arguments": {"filename": out, "format": "png"}})
         try:
@@ -132,7 +135,7 @@ class VM:
 
     def _resolution(self):
         if self._w is None:
-            self.screenshot(os.path.join(_HERE, ".size.png"))
+            self.screenshot(os.path.join(_HERE, f".size-{os.getpid()}.png"))
         return self._w, self._h
 
     def _abs(self, x: int, y: int):
