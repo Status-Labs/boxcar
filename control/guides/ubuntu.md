@@ -35,18 +35,33 @@ visibly focus an address bar after one try, a dialog is blocking it: dismiss the
 dialog (or, for a download/fetch, just use `run_bash` with `curl` instead of the
 browser). Never press `ctrl-l` repeatedly — if it didn't work once, change tack.
 
-## Filling in web forms (do this to avoid typos)
-1. **The first field is usually already focused** when a form/page loads — just
-   `type_text` straight away, no click needed.
+## Filling in web forms (do this to avoid typos and missed clicks)
+1. To fill the first field: `type_text`, then CHECK the next screenshot — if
+   your text did **not** appear in the field, the field wasn't focused: click
+   it **once** and type again. Never submit a form without seeing your text in
+   the fields on screen.
 2. To focus another field, click it **once**, then immediately `type_text`. Do
    NOT click the same field again — if your click didn't land, press **tab** to
    move between fields instead of re-clicking. Never click a field repeatedly.
 3. After typing in a field, **tab** to the next one and type; repeat down the form.
 4. To replace text already in a field, click it once, **ctrl-a** (select all),
    then type the new value — don't backspace character by character.
-5. When all fields are filled, click the form's button (e.g. "Sign in",
-   "Save draft", "Create account") **once**, then take a screenshot to confirm.
-6. If you see a browser **"Confirm Form Resubmission"** dialog, don't fight it —
+5. **Small controls are easy to miss with clicks — drive them by keyboard:**
+   - **checkbox**: focus it (tab, or one click), then press **spc** to toggle;
+     confirm the check mark in the screenshot.
+   - **dropdown (`select`)**: click it **once** — the option list pops open.
+     Read the list in the screenshot, press **down**/**up** to highlight the
+     option you want, then **enter** to commit. (Typing the option's first
+     letter also jumps to it.) NEVER click a dropdown repeatedly — a second
+     click just closes the list; if nothing seemed to happen, the click missed:
+     use tab + arrows instead.
+   - **button**: when it has keyboard focus (tab), **enter** activates it.
+6. When all fields are filled AND the screenshot shows the right values, click
+   the form's button (e.g. "Sign in", "Save draft", "Create account") **once**,
+   then take a screenshot to confirm.
+7. If a click on a small control visibly changed nothing, do NOT re-click at
+   slightly different pixels — switch to the keyboard (tab/spc/arrows/enter).
+8. If you see a browser **"Confirm Form Resubmission"** dialog, don't fight it —
    re-navigate to the page with **ctrl-l** + the URL + enter, then refill.
 
 ## Filesystem
@@ -80,16 +95,20 @@ Home is `/home/user`; the Desktop is `~/Desktop`.
   (don't guess pixels), then act on the selection by keyboard: **Delete** moves it
   to the Trash (no confirmation; it just leaves the folder), **F2** renames,
   **enter** opens it. Avoid Shift+Delete unless you mean to permanently erase it.
-- **Save a GUI file to an exact path** (GTK Save dialog): typing a full path into
-  the "Name" field does NOT change folder. Follow this exact recipe once the Save
-  dialog is open — do it once, in order, then stop and screenshot:
-  1. Press **ctrl-l** **once** — a location entry appears (or the Name field
-     becomes a path entry). Do NOT press ctrl-l again; if you can already type a
-     path, skip straight to step 2.
-  2. Type the **full path** (e.g. `/home/user/Desktop/poem.txt`).
-  3. Press **enter**. In GNOME Text Editor that enter usually saves directly; if a
-     **Save** button is still showing, click it **once**.
-  4. **Never click Cancel** — Cancel throws away the save and the dialog. If
+- **Save a GUI file to an exact path** (GTK Save dialog, e.g. Text Editor Save
+  As): the dialog opens with the **Name field already focused and only the name
+  stem selected — the extension is NOT selected**. If you just start typing, the
+  old extension is kept and you get `poem.txt.txt`. Do exactly this, once, in
+  order, then stop and screenshot:
+  1. Press **ctrl-a** — selects the WHOLE pre-filled name, extension included.
+  2. Type the **full absolute path** (e.g. `/home/user/Desktop/poem.txt`). The
+     Name field accepts an absolute path and saves to exactly that file — no
+     folder navigation needed. (Do NOT use ctrl-l here: it does nothing in this
+     dialog because focus is already in the Name entry.)
+  3. Press **enter**. If a **Save** button is still showing, click it **once**.
+  4. If a dialog asks **"A file named … already exists. Do you want to replace
+     it?"**, click **Replace** (`click_element {"name":"Replace"}`).
+  5. **Never click Cancel** — Cancel throws away the save and the dialog. If
      something looks wrong, screenshot and re-read the dialog rather than
      cancelling or re-opening it.
   Confirm the file with `run_bash` (`cat <path>`).

@@ -115,6 +115,43 @@ def serve(handler_cls, host: str = "127.0.0.1", port: int = 0) -> http.server.HT
 # --------------------------------------------------------------------------- #
 # Small helpers for desktop / shell scenario checks (guest-side, over SSH).
 # --------------------------------------------------------------------------- #
+def reset_browser(vm):
+    """Close any browser left over from a prior run/sample (web-scenario setup).
+
+    Each sample restarts the mock server, but the guest's browser is not
+    stateless: a leftover window still shows the PREVIOUS sample's completed
+    flow (e.g. a "Reminder sent!" confirmation page), so the agent — even when
+    told to re-verify before finishing — sees a genuinely completed screen and
+    reports done at step 2 without doing anything. Kill the browser so every
+    sample starts from the desktop. (Same class of cross-sample contamination
+    as the desktop apps' pkill in editor/settings setup.)
+
+    NB: the [c] bracket keeps the -f pattern from matching this command's own
+    `bash -c` wrapper over SSH (pkill only excludes its own pid, not its parent
+    shell). TERM first so Chrome exits cleanly (no "restore pages?" crash
+    bubble on relaunch); -9 catches any stragglers.
+    """
+    if vm is None:  # host-only tests drive scenarios without a VM
+        return
+    try:
+        from winvm import WinVM
+        if isinstance(vm, WinVM):
+            vm.run("taskkill /im chrome.exe /f /t >nul 2>&1 & exit /b 0")
+            return
+        vm.run(f"pkill -u {vm.username} -f '[c]hrome' 2>/dev/null; true")
+        vm.run("sleep 1")
+        vm.run(f"pkill -9 -u {vm.username} -f '[c]hrome' 2>/dev/null; true")
+        # The Software Updater ("Install Now / Remind Me Later") auto-pops on the
+        # un-rebaked base image and STEALS FOCUS mid-run — it covers the page, so
+        # the agent's clicks land on the dialog and the form is never filled
+        # (seen live in triage). Kill the updater + its nagger so it can't appear.
+        # Bracket avoids self-matching the bash -c wrapper (see the pkill memo).
+        vm.run(f"pkill -u {vm.username} -f '[u]pdate-manager' 2>/dev/null; "
+               f"pkill -u {vm.username} -f '[u]pdate-notifier' 2>/dev/null; true")
+    except Exception:  # noqa: BLE001 - best-effort cleanup must not fail setup
+        pass
+
+
 def read_guest_file(vm, path: str) -> Optional[str]:
     """Return the contents of a guest file, or None if it doesn't exist.
     Works on both targets (cat on Linux, type on Windows via the default shell)."""

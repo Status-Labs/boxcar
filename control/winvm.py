@@ -29,6 +29,28 @@ import time
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
 
+def _best_match(els, name, role=None):
+    """Pick the element `name` refers to, exact-name matches first.
+
+    First-substring-match is a trap: the needle can sit inside a *cousin* that
+    happens to come earlier in tree order. Live example (GNOME Settings,
+    Appearance panel): "Dark" substring-matched the "Ubuntu Dark" wallpaper
+    thumbnail before the Dark style toggle button — the click "succeeded",
+    changed the wallpaper, and the style never flipped. Rank: exact name, then
+    substring; within a rank prefer an element with a usable rect, then tree
+    order."""
+    needle = name.lower().strip()
+    best = None
+    for i, e in enumerate(els):
+        n = (e["name"] or "").lower().strip()
+        if needle not in n or (role is not None and role != e["role"]):
+            continue
+        key = (0 if n == needle else 1, 0 if e.get("clickable") else 1, i)
+        if best is None or key < best[0]:
+            best = (key, e)
+    return best[1] if best else None
+
+
 class VM:
     """Base VM control: QMP (screen/keyboard/mouse) + SSH (run/copy).
     Subclasses set DEFAULT_QMP / DEFAULT_PORT and add OS-specific helpers
@@ -83,22 +105,37 @@ class VM:
     def screenshot(self, path: str | None = None):
         """Capture the screen to a PNG. Returns the file path (or a PIL.Image
         if Pillow is installed and no path is given)."""
-        out = os.path.abspath(path) if path else os.path.join(_HERE, ".last.png")
+        # Default paths are per-process: concurrent eval workers must not share
+        # screenshot files (see policy.SHOT).
+        out = (os.path.abspath(path) if path
+               else os.path.join(_HERE, f".last-{os.getpid()}.png"))
         self._cmd({"execute": "screendump",
                    "arguments": {"filename": out, "format": "png"}})
         try:
             from PIL import Image
-            img = Image.open(out)
-            self._w, self._h = img.size
-            if path:
-                return out
-            return img
         except ImportError:
             return out
+        # screendump can return before the PNG is fully written, so the file is
+        # occasionally caught truncated — the vision API then rejects the whole
+        # step ("You uploaded an unsupported image"; seen ~2/10 runs under load).
+        # Fully decode to validate; on failure wait and re-dump.
+        for attempt in range(4):
+            try:
+                img = Image.open(out)
+                img.load()
+                self._w, self._h = img.size
+                if path:
+                    return out
+                return img
+            except Exception:  # noqa: BLE001 - truncated/invalid PNG
+                time.sleep(0.4)
+                self._cmd({"execute": "screendump",
+                           "arguments": {"filename": out, "format": "png"}})
+        raise RuntimeError(f"screendump produced an unreadable PNG at {out}")
 
     def _resolution(self):
         if self._w is None:
-            self.screenshot(os.path.join(_HERE, ".size.png"))
+            self.screenshot(os.path.join(_HERE, f".size-{os.getpid()}.png"))
         return self._w, self._h
 
     def _abs(self, x: int, y: int):
@@ -271,9 +308,7 @@ class WinVM(VM):
         if index is not None and 0 <= index < len(els):
             target = els[index]
         elif name:
-            target = next((e for e in els
-                           if name.lower() in (e["name"] or "").lower()
-                           and (role is None or role == e["role"])), None)
+            target = _best_match(els, name, role)
         if target is None:
             return False, "notfound"
         if not target.get("clickable"):
@@ -307,11 +342,15 @@ class LinuxVM(VM):
 
     def _session_env(self) -> str:
         """Shell prefix that exports the logged-in GNOME session's env (DISPLAY,
-        XAUTHORITY, DBUS_SESSION_BUS_ADDRESS) so SSH commands can reach the GUI
-        and the AT-SPI accessibility bus."""
+        XAUTHORITY, DBUS_SESSION_BUS_ADDRESS, XDG_CURRENT_DESKTOP) so SSH
+        commands can reach the GUI and the AT-SPI accessibility bus.
+        XDG_CURRENT_DESKTOP matters for launch_gui: apps that gate on the
+        desktop (gnome-control-center: "only supported under GNOME") exit
+        immediately without it."""
         return (f"PID=$(pgrep -u {self.username} gnome-shell | head -1); "
                 "export $(tr '\\0' '\\n' < /proc/$PID/environ | grep -E "
-                "'^(DISPLAY|XAUTHORITY|DBUS_SESSION_BUS_ADDRESS)=' | xargs); ")
+                "'^(DISPLAY|XAUTHORITY|DBUS_SESSION_BUS_ADDRESS"
+                "|XDG_CURRENT_DESKTOP)=' | xargs); ")
 
     def launch_gui(self, command: str):
         """Launch a GUI app into the logged-in desktop session from SSH."""
@@ -383,9 +422,7 @@ class LinuxVM(VM):
         if index is not None and 0 <= index < len(els):
             target = els[index]
         elif name:
-            target = next((e for e in els
-                           if name.lower() in (e["name"] or "").lower()
-                           and (role is None or role == e["role"])), None)
+            target = _best_match(els, name, role)
         if target is not None and target.get("clickable"):
             x, y, w, h = target["rect"]
             self.click(int(x + w / 2), int(y + h / 2), double=double)
