@@ -159,7 +159,12 @@ def run_agent(vm, target, decide, task, *, a11y=False, max_steps=40,
         step.obs = execute(vm, target, step.tool, parse_args(step.args))
         res.vm_s += time.perf_counter() - a0
 
-        if repeats >= stall_abort or clicks_no_type >= stall_abort:
+        # Click-only stretches (a wizard's Next + a checkbox + submit) can chain
+        # several legitimate clicks with no typing — give that signal headroom
+        # over hard (tool,args)-identical loops so a *progressing* run isn't
+        # killed (a live signup run died at exactly 8: 4 near-misses on Next +
+        # 4 on the terms checkbox).
+        if repeats >= stall_abort or clicks_no_type >= stall_abort + 4:
             res.stuck = True
             why = (f"repeated `{step.tool} {step.args}` {repeats}x" if repeats >= stall_abort
                    else f"clicked {clicks_no_type}x without typing")
@@ -174,11 +179,13 @@ def run_agent(vm, target, decide, task, *, a11y=False, max_steps=40,
                          "methods (e.g. if a page won't load, use run_bash/curl or the "
                          "shell; otherwise try a different element or action).")
         elif clicks_no_type >= stall_warn:
-            step.obs += (f"  ⚠ You have clicked {clicks_no_type}x without typing. After "
-                         "clicking a field ONCE, your next action should be type_text. "
-                         "The first form field is usually already focused — just type. "
-                         "If a click isn't landing, press Tab to move between fields "
-                         "instead of re-clicking.")
+            step.obs += (f"  ⚠ You have clicked {clicks_no_type}x without typing. If "
+                         "your clicks are not visibly changing anything they are "
+                         "MISSING the control — stop re-clicking and use the "
+                         "keyboard: tab moves focus between controls, spc toggles a "
+                         "focused checkbox, down/up + enter picks a dropdown option, "
+                         "enter activates a focused button. After clicking a text "
+                         "field ONCE, just type.")
         res.steps.append(step)
         history_lines.append(f"{i}. {step.tool} {step.args} -> {step.obs[:300]}")
 
