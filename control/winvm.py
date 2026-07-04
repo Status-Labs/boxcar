@@ -110,13 +110,25 @@ class VM:
                    "arguments": {"filename": out, "format": "png"}})
         try:
             from PIL import Image
-            img = Image.open(out)
-            self._w, self._h = img.size
-            if path:
-                return out
-            return img
         except ImportError:
             return out
+        # screendump can return before the PNG is fully written, so the file is
+        # occasionally caught truncated — the vision API then rejects the whole
+        # step ("You uploaded an unsupported image"; seen ~2/10 runs under load).
+        # Fully decode to validate; on failure wait and re-dump.
+        for attempt in range(4):
+            try:
+                img = Image.open(out)
+                img.load()
+                self._w, self._h = img.size
+                if path:
+                    return out
+                return img
+            except Exception:  # noqa: BLE001 - truncated/invalid PNG
+                time.sleep(0.4)
+                self._cmd({"execute": "screendump",
+                           "arguments": {"filename": out, "format": "png"}})
+        raise RuntimeError(f"screendump produced an unreadable PNG at {out}")
 
     def _resolution(self):
         if self._w is None:
