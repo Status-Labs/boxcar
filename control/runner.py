@@ -89,6 +89,7 @@ def run_agent(vm, target, decide, task, *, a11y=False, max_steps=40,
     res = RunResult(task=task, target=target, usage_since=_lm_history_len())
     history_lines: list[str] = []
     prev_sig, repeats, clicks_no_type = None, 0, 0
+    awaiting_confirm = False  # require two consecutive `done` claims to finish
     t_start = time.perf_counter()
     for i in range(max_steps):
         c0 = time.perf_counter()
@@ -118,11 +119,29 @@ def run_agent(vm, target, decide, task, *, a11y=False, max_steps=40,
         if verbose:
             print(f"[{i}] {step.tool} {step.args}  (llm {step.llm_s:.1f}s) — {step.note}")
         if done:
-            step.obs = "(done)"
+            # Premature-`done` is a common failure: the model claims completion
+            # early (sometimes at step 0 with a no-op like `run_bash ":"`) on an
+            # assumption or a stale/misread screen. Don't finish on the first
+            # claim — force one fresh look + an explicit re-check, and only accept
+            # when the model confirms `done` twice in a row.
+            if awaiting_confirm:
+                step.obs = "(done, confirmed)"
+                res.steps.append(step)
+                res.done = True
+                res.final_note = step.note
+                break
+            awaiting_confirm = True
+            step.obs = "(you reported the task complete — verify before finishing)"
             res.steps.append(step)
-            res.done = True
-            res.final_note = step.note
-            break
+            history_lines.append(
+                f"{i}. You reported the task COMPLETE — do NOT finish on an "
+                "assumption. Look at the CURRENT screen and re-check every "
+                "requirement of the task (file actually saved? setting actually "
+                "changed? exact text present where it should be?). If it is truly "
+                "done, report done once more. If anything is missing or you only "
+                "intended to act, do the next concrete action now.")
+            continue
+        awaiting_confirm = False  # a real action resets the confirm gate
         # Stall detection, two signals:
         #  (1) the same (tool,args) chosen repeatedly — a hard no-op loop;
         #  (2) consecutive coordinate-clicks with no typing in between — the
@@ -140,7 +159,12 @@ def run_agent(vm, target, decide, task, *, a11y=False, max_steps=40,
         step.obs = execute(vm, target, step.tool, parse_args(step.args))
         res.vm_s += time.perf_counter() - a0
 
-        if repeats >= stall_abort or clicks_no_type >= stall_abort:
+        # Click-only stretches (a wizard's Next + a checkbox + submit) can chain
+        # several legitimate clicks with no typing — give that signal headroom
+        # over hard (tool,args)-identical loops so a *progressing* run isn't
+        # killed (a live signup run died at exactly 8: 4 near-misses on Next +
+        # 4 on the terms checkbox).
+        if repeats >= stall_abort or clicks_no_type >= stall_abort + 4:
             res.stuck = True
             why = (f"repeated `{step.tool} {step.args}` {repeats}x" if repeats >= stall_abort
                    else f"clicked {clicks_no_type}x without typing")
@@ -155,11 +179,13 @@ def run_agent(vm, target, decide, task, *, a11y=False, max_steps=40,
                          "methods (e.g. if a page won't load, use run_bash/curl or the "
                          "shell; otherwise try a different element or action).")
         elif clicks_no_type >= stall_warn:
-            step.obs += (f"  ⚠ You have clicked {clicks_no_type}x without typing. After "
-                         "clicking a field ONCE, your next action should be type_text. "
-                         "The first form field is usually already focused — just type. "
-                         "If a click isn't landing, press Tab to move between fields "
-                         "instead of re-clicking.")
+            step.obs += (f"  ⚠ You have clicked {clicks_no_type}x without typing. If "
+                         "your clicks are not visibly changing anything they are "
+                         "MISSING the control — stop re-clicking and use the "
+                         "keyboard: tab moves focus between controls, spc toggles a "
+                         "focused checkbox, down/up + enter picks a dropdown option, "
+                         "enter activates a focused button. After clicking a text "
+                         "field ONCE, just type.")
         res.steps.append(step)
         history_lines.append(f"{i}. {step.tool} {step.args} -> {step.obs[:300]}")
 

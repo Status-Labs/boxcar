@@ -172,12 +172,18 @@ def dump(limit):
 
 
 def act(name):
-    needle = name.lower()
+    # Exact-name matches beat substring matches: the needle can sit inside a
+    # cousin earlier in tree order ("Dark" inside the "Ubuntu Dark" wallpaper
+    # thumbnail vs the Dark style toggle) — firing the first substring hit
+    # activates the wrong widget. Within a rank, keep tree order.
+    needle = name.lower().strip()
+    candidates = []  # (rank, discovery order, action, action index, action name)
     for app in apps():
         for acc in walk(app):
             if not visible_actionable(acc):
                 continue
-            if needle not in (acc.name or "").lower():
+            n = (acc.name or "").lower().strip()
+            if needle not in n:
                 continue
             try:
                 action = acc.queryAction()
@@ -189,10 +195,16 @@ def act(name):
             idx = next((names.index(p) for p in ACTION_PREF if p in names), None)
             if idx is None:
                 continue
-            action.doAction(idx)
-            print(json.dumps({"ok": True, "did": names[idx], "name": acc.name}))
-            return
-    print(json.dumps({"ok": False, "reason": "no element with an activating action"}))
+            candidates.append((0 if n == needle else 1, len(candidates),
+                               action, idx, acc.name))
+    if not candidates:
+        print(json.dumps({"ok": False,
+                          "reason": "no element with an activating action"}))
+        return
+    _, _, action, idx, acc_name = min(candidates)
+    did = action.getName(idx).lower()
+    action.doAction(idx)
+    print(json.dumps({"ok": True, "did": did, "name": acc_name}))
 
 
 def main():

@@ -127,6 +127,92 @@ def test_signup_partial_scores_below_one():
         ctx.stop()
 
 
+def test_click_element_prefers_exact_name():
+    import os
+    control = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                           "control")
+    if control not in sys.path:
+        sys.path.insert(0, control)
+    from winvm import _best_match
+    # The live failure this guards: in Settings -> Appearance, the "Ubuntu Dark"
+    # wallpaper thumbnail precedes the "Dark" style toggle in tree order, so a
+    # first-substring-match clicked the wallpaper and the style never changed.
+    els = [
+        {"name": "Ubuntu Dark", "role": "table cell",
+         "rect": [722, 893, 150, 114], "clickable": True},
+        {"name": "Dark", "role": "toggle button",
+         "rect": [809, 207, 176, 133], "clickable": True},
+    ]
+    assert _best_match(els, "Dark")["role"] == "toggle button"
+    # Substring still works when there is no exact match...
+    assert _best_match(els, "ubuntu")["name"] == "Ubuntu Dark"
+    # ...role filtering still applies, and misses return None.
+    assert _best_match(els, "Dark", role="table cell")["name"] == "Ubuntu Dark"
+    assert _best_match(els, "Nonexistent") is None
+    # Within a rank, a clickable element beats an earlier unclickable one.
+    els2 = [{"name": "Save", "role": "push button", "rect": None, "clickable": False},
+            {"name": "Save", "role": "push button",
+             "rect": [10, 10, 50, 20], "clickable": True}]
+    assert _best_match(els2, "Save")["clickable"] is True
+    print("  ok  winvm     click_element prefers exact-name matches (Dark vs Ubuntu Dark)")
+
+
+def test_confirm_done_gate():
+    import os
+    control = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                           "control")
+    if control not in sys.path:
+        sys.path.insert(0, control)
+    from policy import SHOT
+    from runner import run_agent
+    from PIL import Image
+    Image.new("RGB", (4, 3)).save(SHOT)
+
+    class FakeVM:
+        username = "user"
+
+        def _resolution(self):
+            return (4, 3)
+
+        def screenshot(self, path):
+            pass
+
+        def key(self, *a):
+            pass
+
+        def sleep(self, s):
+            pass
+
+        def run(self, *a, **k):
+            return (0, "", "")
+
+    class Pred:
+        def __init__(self, tool, args, note, done):
+            self.tool, self.args, self.note, self.done = tool, args, note, done
+
+    def decider(script):
+        it = iter(script)
+        return lambda **kw: next(it)
+
+    done = Pred("run_bash", '{"script":":"}', "done!", "true")
+    act = Pred("key", '{"keys":"ret"}', "acting", "false")
+    # A single premature `done` is not accepted — the model must confirm it on a
+    # fresh screenshot; two consecutive `done`s finish the run.
+    res = run_agent(FakeVM(), "ubuntu", decider([done, done]), "t", verbose=False)
+    assert res.done and res.n_steps == 2, (res.done, res.n_steps)
+    assert "verify" in res.steps[0].obs
+    # A real action between two `done`s resets the gate.
+    res = run_agent(FakeVM(), "ubuntu", decider([done, act, done, done]), "t",
+                    verbose=False)
+    assert res.done and res.n_steps == 4, (res.done, res.n_steps)
+    # An unconfirmed `done` at the step cap ends the run not-done (check() still
+    # decides pass/fail from end state).
+    res = run_agent(FakeVM(), "ubuntu", decider([act, done]), "t", max_steps=2,
+                    verbose=False)
+    assert not res.done and res.n_steps == 2
+    print("  ok  runner    confirm-done gate: 2x-consecutive done, action resets")
+
+
 def _eval_parallel():
     """Import control/eval_parallel (needs control/ on sys.path); skip if absent."""
     import os

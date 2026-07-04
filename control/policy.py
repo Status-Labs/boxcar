@@ -34,7 +34,11 @@ litellm.drop_params = True
 VM_CLASS = {"win11": WinVM, "ubuntu": LinuxVM}
 RUN_TOOL = {"win11": "run_powershell", "ubuntu": "run_bash"}
 
-SHOT = "/tmp/agent_shot.png"
+# Per-process: parallel eval workers (eval_parallel.py) each drive their own
+# clone from their own process; a shared path makes their screendumps clobber
+# each other mid-write (truncated PNGs rejected by the vision API) and can even
+# hand one worker another clone's screen.
+SHOT = f"/tmp/agent_shot-{os.getpid()}.png"
 
 
 # ============================================================================
