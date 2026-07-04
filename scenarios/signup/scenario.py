@@ -2,7 +2,7 @@
 import json
 import os
 
-from ..framework import CheckResult, Scenario, ScenarioContext
+from ..framework import CheckResult, Scenario, ScenarioContext, reset_browser
 from . import server
 
 ACCOUNTS = server.ACCOUNTS
@@ -18,6 +18,7 @@ WANT = {
 
 
 def setup(ctx: ScenarioContext, vm):
+    reset_browser(vm)  # sample N-1's browser still shows a completed flow
     if os.path.exists(ACCOUNTS):
         os.remove(ACCOUNTS)
     ctx.serve(server.Handler)

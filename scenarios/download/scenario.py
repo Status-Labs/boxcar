@@ -4,13 +4,20 @@ No host-side state: the verifiable end state lives in the guest filesystem —
 ~/Downloads/sales.csv must exist and ~/answer.txt must hold the CSV total
 (976.23). `check` reads both over SSH.
 """
-from ..framework import CheckResult, Scenario, ScenarioContext, guest_path_exists, read_guest_file
+from ..framework import (CheckResult, Scenario, ScenarioContext,
+                         guest_path_exists, read_guest_file, reset_browser)
 from . import server
 
 EXPECTED_TOTAL = 976.23
 
 
 def setup(ctx: ScenarioContext, vm):
+    reset_browser(vm)  # sample N-1's browser still shows a completed flow
+    # The check reads guest files — remove sample N-1's artifacts or this
+    # sample could stale-pass without the agent doing anything.
+    if vm is not None:  # host-only tests drive scenarios without a VM
+        vm.run(f"rm -f /home/{vm.username}/answer.txt "
+               f"/home/{vm.username}/Downloads/sales.csv*")
     ctx.serve(server.Handler)
 
 
