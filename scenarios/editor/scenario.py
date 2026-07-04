@@ -24,10 +24,18 @@ def setup(ctx: ScenarioContext, vm):
     # run starts from an empty editor. A leftover window (stale text, an open Save
     # dialog) makes the run non-deterministic and lets the agent skip straight to
     # saving — or assume the task is already done and no-op.
-    # NB: -f (match full cmdline) is required — the process comm is truncated to
-    # 15 chars ("gnome-text-edit"), so a plain `pkill gnome-text-editor` matches
-    # nothing.
-    vm.run(f"pkill -u {vm.username} -f gnome-text-editor 2>/dev/null; true")
+    # NB (both live-diagnosed):
+    #  * -f (match full cmdline) is required — the comm is truncated to 15 chars
+    #    ("gnome-text-edit"), so a plain `pkill gnome-text-editor` matches nothing.
+    #    But a bare -f pattern ALSO matches this command's own `bash -c` wrapper
+    #    over SSH (the cmdline contains the pattern) and kills it mid-chain — the
+    #    [g] bracket keeps the pattern from matching itself.
+    #  * -9, not TERM: on graceful exit the editor SAVES its session, and the next
+    #    launch restores the previous sample's document — cross-sample text
+    #    contamination (doubled content). SIGKILL + removing the session state dir
+    #    guarantees the next sample opens an empty editor.
+    vm.run(f"pkill -9 -u {vm.username} -f '[g]nome-text-editor' 2>/dev/null; true")
+    vm.run(f"rm -rf /home/{vm.username}/.local/share/org.gnome.TextEditor")
     # Clean any leftover from a previous run so the check can't pass stale.
     vm.run(f"rm -f {_path(vm)}")
 

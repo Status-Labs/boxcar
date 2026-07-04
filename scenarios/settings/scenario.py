@@ -27,8 +27,10 @@ def setup(ctx: ScenarioContext, vm):
     # non-deterministic and lets the agent assume the task is already done.
     # NB: -f (match full cmdline) is required — the process comm is truncated to
     # 15 chars ("gnome-control-c"), so a plain `pkill gnome-control-center` matches
-    # nothing.
-    vm.run(f"pkill -u {vm.username} -f gnome-control-center 2>/dev/null; true")
+    # nothing. The [g] bracket keeps the pattern from matching this command's own
+    # `bash -c` wrapper over SSH (which would get killed instead); -9 avoids any
+    # state writes on the way out.
+    vm.run(f"pkill -9 -u {vm.username} -f '[g]nome-control-center' 2>/dev/null; true")
     vm.run(_session(vm) + f"gsettings set {KEY} default")
 
 

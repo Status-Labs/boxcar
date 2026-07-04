@@ -80,16 +80,20 @@ Home is `/home/user`; the Desktop is `~/Desktop`.
   (don't guess pixels), then act on the selection by keyboard: **Delete** moves it
   to the Trash (no confirmation; it just leaves the folder), **F2** renames,
   **enter** opens it. Avoid Shift+Delete unless you mean to permanently erase it.
-- **Save a GUI file to an exact path** (GTK Save dialog): typing a full path into
-  the "Name" field does NOT change folder. Follow this exact recipe once the Save
-  dialog is open — do it once, in order, then stop and screenshot:
-  1. Press **ctrl-l** **once** — a location entry appears (or the Name field
-     becomes a path entry). Do NOT press ctrl-l again; if you can already type a
-     path, skip straight to step 2.
-  2. Type the **full path** (e.g. `/home/user/Desktop/poem.txt`).
-  3. Press **enter**. In GNOME Text Editor that enter usually saves directly; if a
-     **Save** button is still showing, click it **once**.
-  4. **Never click Cancel** — Cancel throws away the save and the dialog. If
+- **Save a GUI file to an exact path** (GTK Save dialog, e.g. Text Editor Save
+  As): the dialog opens with the **Name field already focused and only the name
+  stem selected — the extension is NOT selected**. If you just start typing, the
+  old extension is kept and you get `poem.txt.txt`. Do exactly this, once, in
+  order, then stop and screenshot:
+  1. Press **ctrl-a** — selects the WHOLE pre-filled name, extension included.
+  2. Type the **full absolute path** (e.g. `/home/user/Desktop/poem.txt`). The
+     Name field accepts an absolute path and saves to exactly that file — no
+     folder navigation needed. (Do NOT use ctrl-l here: it does nothing in this
+     dialog because focus is already in the Name entry.)
+  3. Press **enter**. If a **Save** button is still showing, click it **once**.
+  4. If a dialog asks **"A file named … already exists. Do you want to replace
+     it?"**, click **Replace** (`click_element {"name":"Replace"}`).
+  5. **Never click Cancel** — Cancel throws away the save and the dialog. If
      something looks wrong, screenshot and re-read the dialog rather than
      cancelling or re-opening it.
   Confirm the file with `run_bash` (`cat <path>`).
