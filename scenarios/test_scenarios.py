@@ -170,14 +170,19 @@ def test_confirm_done_gate():
 
     class FakeVM:
         username = "user"
+
         def _resolution(self):
             return (4, 3)
+
         def screenshot(self, path):
             pass
+
         def key(self, *a):
             pass
+
         def sleep(self, s):
             pass
+
         def run(self, *a, **k):
             return (0, "", "")
 
