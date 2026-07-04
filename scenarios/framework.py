@@ -141,6 +141,13 @@ def reset_browser(vm):
         vm.run(f"pkill -u {vm.username} -f '[c]hrome' 2>/dev/null; true")
         vm.run("sleep 1")
         vm.run(f"pkill -9 -u {vm.username} -f '[c]hrome' 2>/dev/null; true")
+        # The Software Updater ("Install Now / Remind Me Later") auto-pops on the
+        # un-rebaked base image and STEALS FOCUS mid-run — it covers the page, so
+        # the agent's clicks land on the dialog and the form is never filled
+        # (seen live in triage). Kill the updater + its nagger so it can't appear.
+        # Bracket avoids self-matching the bash -c wrapper (see the pkill memo).
+        vm.run(f"pkill -u {vm.username} -f '[u]pdate-manager' 2>/dev/null; "
+               f"pkill -u {vm.username} -f '[u]pdate-notifier' 2>/dev/null; true")
     except Exception:  # noqa: BLE001 - best-effort cleanup must not fail setup
         pass
 
