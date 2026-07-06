@@ -352,6 +352,58 @@ scheduled task; Linux just borrows the session's DBus/X env.)
 widgets** (shell/GTK3), with graceful fallback to vision/shell where AT-SPI is
 too immature (GTK4). a11y is opt-in (`--a11y`); default behavior is unchanged.
 
+## 📊 Benchmark results
+
+The scenario suite, run end-to-end and scored by verifiable end state
+([docs/evals.md](docs/evals.md)). **pass@10** = passes out of 10 independent
+samples per scenario. Kept up to date as the agent improves — PRs that claim a
+reliability win should update this table with an n≥10 run.
+
+**Current** (2026-07-05, commit `07d012b`, gpt-5 @ low effort, Ubuntu, `--a11y`):
+
+| scenario | kind | pass@10 | score (mean±sd) | failure mode, if any |
+|----------|------|---------|-----------------|----------------------|
+| download | web  | 10/10   | 1.00±0.00 | — |
+| editor   | desktop | 10/10 | 1.00±0.00 | — |
+| files    | desktop | 10/10 | 1.00±0.00 | — |
+| settings | desktop | 10/10 | 1.00±0.00 | — |
+| signup   | web  | 9/10    | 0.88±0.30 | form-widget grounding |
+| invoices | web  | 8/10    | 0.86±0.28 | form-widget grounding |
+| webmail  | web  | 4/10    | 0.40±0.49 | web-widget grounding |
+| expense  | web  | 3/10    | 0.30±0.46 | never submits report form |
+| triage   | web  | 2/10    | 0.20±0.40 | native `<select>`/checkbox stalls |
+| **total** | | **66/90 = 73.3%** | | ~$10.6 / full pass |
+
+**Headline:** the desktop suite is **40/40** with `--a11y`. Every residual
+failure is a **web** scenario: Chrome page content does not appear in the Linux
+AT-SPI tree, so `click_element` can't ground web widgets and the agent falls
+back to pixel-guessing on small form controls. The next lever is **CDP
+(Chrome DevTools Protocol) grounding**.
+
+### Run history
+
+| date | commit | config | total | notes |
+|------|--------|--------|-------|-------|
+| 2026-07-05 | `07d012b` | gpt-5, `--a11y` | **66/90 (73.3%)** | desktop 40/40; residual = web grounding |
+| 2026-07-04 | `07d012b` | gpt-5, no a11y | 53/90 (58.9%) | ablation: `files` 0/10 without a11y (vs 10/10 with) — a11y is decisive for click-bound desktop flows |
+
+### Reproducing
+
+```bash
+# spawn 3 headless clones and log them into the desktop, then:
+make eval-parallel NAMES=val1,val2,val3 SAMPLES=10 EVAL_ARGS=--a11y
+
+# single scenario, single clone:
+make eval NAME=val1 SCENARIO=triage SAMPLES=10 EVAL_ARGS=--a11y
+```
+
+JSON reports land in `control/optim/reports/eval-*.json` (written only on full
+completion). Run with `--a11y` for comparable numbers — the desktop scenarios
+are grounded via AT-SPI and score far lower without it. A full n=10 pass costs
+roughly **$8–11** of gpt-5 usage; probe your API quota with one small call
+before launching (an `insufficient_quota` mid-run invalidates the affected
+scenarios at 0 steps).
+
 ## Fast VM spawning (golden images)
 
 A full install is slow (~15–25 min) and you only need to pay it once. **Bake** a
